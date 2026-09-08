@@ -7,6 +7,15 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.3 - 2026-09-08
+
+### Added
+
+- `MessageEntity`, with `Message.Entities` and `Message.CaptionEntities`.
+  Telegram's own markup of a text -- the bold run, the link, the code span --
+  is protocol, and a bot that turns it back into Markdown cannot work without
+  it. Offsets are UTF-16 code units, which is the part worth knowing.
+
 ## v0.0.1-alpha.2 - 2026-09-08
 
 What the second consumer needed. makeitMD keeps an audit trail of exactly what

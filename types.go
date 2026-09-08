@@ -88,19 +88,21 @@ type Message struct {
 	EphemeralMessageID int64 `json:"ephemeral_message_id"`
 	MessageThreadID    int   `json:"message_thread_id"`
 	// From is absent on channel posts, so it is a pointer.
-	From           *User      `json:"from"`
-	ReceiverUser   *User      `json:"receiver_user"`
-	Chat           Chat       `json:"chat"`
-	Date           int64      `json:"date"`
-	Text           string     `json:"text"`
-	Caption        string     `json:"caption"`
-	Voice          *Voice     `json:"voice"`
-	VideoNote      *VideoNote `json:"video_note"`
-	Audio          *Audio     `json:"audio"`
-	Video          *Video     `json:"video"`
-	Document       *Document  `json:"document"`
-	Photo          []Photo    `json:"photo"`
-	ReplyToMessage *Message   `json:"reply_to_message"`
+	From            *User           `json:"from"`
+	ReceiverUser    *User           `json:"receiver_user"`
+	Chat            Chat            `json:"chat"`
+	Date            int64           `json:"date"`
+	Text            string          `json:"text"`
+	Entities        []MessageEntity `json:"entities,omitempty"`
+	Caption         string          `json:"caption"`
+	CaptionEntities []MessageEntity `json:"caption_entities,omitempty"`
+	Voice           *Voice          `json:"voice"`
+	VideoNote       *VideoNote      `json:"video_note"`
+	Audio           *Audio          `json:"audio"`
+	Video           *Video          `json:"video"`
+	Document        *Document       `json:"document"`
+	Photo           []Photo         `json:"photo"`
+	ReplyToMessage  *Message        `json:"reply_to_message"`
 
 	// Raw is the message exactly as Telegram sent it. This package models the
 	// fields the family uses and no more, so Raw is how a bot reaches a field
@@ -119,6 +121,19 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	*m = Message(decoded)
 	m.Raw = append(json.RawMessage(nil), data...)
 	return nil
+}
+
+// MessageEntity is Telegram's own markup of a message's text: the bold run, the
+// link, the code span. Offsets and lengths are in UTF-16 code units, not bytes
+// and not runes, which is the detail that makes hand-rolling this painful.
+type MessageEntity struct {
+	Type          string `json:"type"`
+	Offset        int    `json:"offset"`
+	Length        int    `json:"length"`
+	URL           string `json:"url,omitempty"`
+	User          *User  `json:"user,omitempty"`
+	Language      string `json:"language,omitempty"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
 }
 
 type CallbackQuery struct {
