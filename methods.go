@@ -94,6 +94,18 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, mar
 	}, markup)
 }
 
+// SendPlainText sends text with no parse mode at all. It is the delivery of
+// last resort: HTML that Telegram rejects -- malformed, or using a tag a
+// newer client stopped accepting -- fails the whole send, and a notification
+// that arrives unformatted beats one that does not arrive.
+func (c *Client) SendPlainText(ctx context.Context, chatID int64, text string) (Message, error) {
+	return c.sendMessage(ctx, map[string]any{
+		"chat_id":              chatID,
+		"text":                 text,
+		"link_preview_options": noLinkPreview,
+	}, nil)
+}
+
 // SendReply sends an HTML message as a reply, optionally inside a forum topic.
 func (c *Client) SendReply(ctx context.Context, chatID, replyTo int64, threadID int, text string, markup *InlineKeyboardMarkup) (Message, error) {
 	req := map[string]any{

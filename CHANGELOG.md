@@ -7,6 +7,16 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.5 - 2026-09-08
+
+### Added
+
+- `SendPlainText`, a send with no parse mode. It is the delivery of last
+  resort: HTML that Telegram rejects fails the whole message, and branchy's
+  notification outbox would rather deliver an unformatted notification than
+  none. Every other send in this package sets HTML, which is what made this
+  worth a method rather than a flag.
+
 ## v0.0.1-alpha.4 - 2026-09-08
 
 ### Changed

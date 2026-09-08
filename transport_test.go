@@ -237,3 +237,28 @@ func TestAPIErrorKeepsTheRawBody(t *testing.T) {
 		t.Fatalf("Response = %s, want the body verbatim", apiErr.Response)
 	}
 }
+
+// The fallback send must not carry a parse mode: the point of it is that
+// nothing about the text can make Telegram refuse the message.
+func TestSendPlainTextHasNoParseMode(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	})
+
+	if _, err := c.SendPlainText(context.Background(), 42, "<b>not markup</b>"); err != nil {
+		t.Fatalf("SendPlainText: %v", err)
+	}
+	if _, present := body["parse_mode"]; present {
+		t.Fatalf("parse_mode = %v, want it absent", body["parse_mode"])
+	}
+	if body["text"] != "<b>not markup</b>" {
+		t.Fatalf("text = %v, want it sent verbatim", body["text"])
+	}
+	preview, _ := body["link_preview_options"].(map[string]any)
+	if preview["is_disabled"] != true {
+		t.Fatal("previews stay off for the fallback too")
+	}
+}
