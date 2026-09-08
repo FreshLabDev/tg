@@ -45,6 +45,11 @@ type Event struct {
 	Retryable bool
 	// Err is the attempt's error, already redacted of the bot token.
 	Err error
+	// Probe marks a capability check rather than work the bot asked for. Those
+	// deliberately call a method with an empty body and are answered with a
+	// parameter error, so counting them as failures adds one phantom incident
+	// per probed method to every start.
+	Probe bool
 }
 
 // Observer is called once per HTTP attempt. It must not block: it runs on the

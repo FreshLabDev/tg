@@ -102,24 +102,25 @@ func (c *Client) attempt(ctx context.Context, timeout time.Duration, build func(
 	req, err := build(attemptCtx)
 	if err != nil {
 		err = c.redactError(err)
-		c.emit(method, 0, 0, n, err)
+		c.emit(attemptCtx, method, 0, 0, n, err)
 		return 0, err
 	}
 	return c.do(method, req, out, n)
 }
 
 func (c *Client) do(method string, req *http.Request, out any, n int) (time.Duration, error) {
+	ctx := req.Context()
 	started := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
 		err = c.redactError(err)
-		c.emit(method, 0, time.Since(started), n, err)
+		c.emit(ctx, method, 0, time.Since(started), n, err)
 		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apiErr := c.redactAPI(parseAPIError(method, resp.StatusCode, resp.Body))
-		c.emit(method, resp.StatusCode, time.Since(started), n, apiErr)
+		c.emit(ctx, method, resp.StatusCode, time.Since(started), n, apiErr)
 		return apiErr.RetryAfter, apiErr
 	}
 	// A 2xx that carries ok=false is a refusal, not a success. Telegram does
@@ -129,15 +130,15 @@ func (c *Client) do(method string, req *http.Request, out any, n int) (time.Dura
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if readErr != nil {
 		readErr = c.redactError(readErr)
-		c.emit(method, resp.StatusCode, time.Since(started), n, readErr)
+		c.emit(ctx, method, resp.StatusCode, time.Since(started), n, readErr)
 		return 0, readErr
 	}
 	if apiErr := c.redactAPI(refusal(method, resp.StatusCode, raw)); apiErr != nil {
-		c.emit(method, resp.StatusCode, time.Since(started), n, apiErr)
+		c.emit(ctx, method, resp.StatusCode, time.Since(started), n, apiErr)
 		return apiErr.RetryAfter, apiErr
 	}
 	if out == nil {
-		c.emit(method, resp.StatusCode, time.Since(started), n, nil)
+		c.emit(ctx, method, resp.StatusCode, time.Since(started), n, nil)
 		return 0, nil
 	}
 	if err = json.Unmarshal(raw, out); err != nil {
@@ -146,11 +147,24 @@ func (c *Client) do(method string, req *http.Request, out any, n int) (time.Dura
 		// nor which call produced it.
 		err = fmt.Errorf("%w: %s: %s", ErrUnexpectedResult, method, c.redact(err.Error()))
 	}
-	c.emit(method, resp.StatusCode, time.Since(started), n, err)
+	c.emit(ctx, method, resp.StatusCode, time.Since(started), n, err)
 	return 0, err
 }
 
-func (c *Client) emit(method string, status int, d time.Duration, attempt int, err error) {
+// probeKey marks the requests a capability check makes, so an observer can
+// tell them from work the bot asked for.
+type probeKey struct{}
+
+func withProbe(ctx context.Context) context.Context {
+	return context.WithValue(ctx, probeKey{}, true)
+}
+
+func isProbe(ctx context.Context) bool {
+	probe, _ := ctx.Value(probeKey{}).(bool)
+	return probe
+}
+
+func (c *Client) emit(ctx context.Context, method string, status int, d time.Duration, attempt int, err error) {
 	if c.observe == nil {
 		return
 	}
@@ -161,6 +175,7 @@ func (c *Client) emit(method string, status int, d time.Duration, attempt int, e
 		Attempt:   attempt,
 		Retryable: err != nil && retryableError(err),
 		Err:       err,
+		Probe:     isProbe(ctx),
 	})
 }
 

@@ -114,6 +114,7 @@ func (c *Client) Probe(ctx context.Context, methods ...string) ([]string, error)
 // connection at startup reads as "the server lacks this method".
 func (c *Client) probeOnce(ctx context.Context, method string) error {
 	const attempts = 3
+	ctx = withProbe(ctx)
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
 		var discard map[string]any

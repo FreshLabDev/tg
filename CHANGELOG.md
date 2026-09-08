@@ -7,6 +7,16 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.7 - 2026-09-08
+
+### Fixed
+
+- `Event.Probe` marks the requests a capability check makes. A probe calls a
+  method with an empty body on purpose and is answered with a parameter error,
+  so an observer counting failures recorded one phantom incident per probed
+  method on every start -- visible in voicy's metrics as two Telegram errors
+  after a restart that had served no traffic yet.
+
 ## v0.0.1-alpha.6 - 2026-09-08
 
 What three reviews of the first day's code found. Two of these were leaks.

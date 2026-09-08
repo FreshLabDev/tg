@@ -244,3 +244,35 @@ func TestPreflightWaitBoundsTheWholeCheck(t *testing.T) {
 		t.Fatalf("took %s for a 300ms budget", elapsed)
 	}
 }
+
+// A probe calls a method with an empty body on purpose and is answered with a
+// parameter error. Counted as a failure, that is one phantom incident per
+// probed method on every start -- which is exactly what showed up in voicy's
+// metrics after a restart.
+func TestProbeEventsAreMarked(t *testing.T) {
+	var events []Event
+	c, _ := newTestClient(t, oldServer(map[string]bool{"sendMessage": true}),
+		WithObserver(func(e Event) { events = append(events, e) }))
+
+	if _, err := c.Probe(context.Background(), "sendMessage"); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("the probe made no observable request")
+	}
+	for _, e := range events {
+		if !e.Probe {
+			t.Fatalf("event %+v is not marked as a probe", e)
+		}
+	}
+
+	events = nil
+	if _, err := c.SendMessage(context.Background(), 1, "real work", nil); err == nil {
+		t.Fatal("the stub refuses everything; expected an error")
+	}
+	for _, e := range events {
+		if e.Probe {
+			t.Fatalf("event %+v is work the bot asked for, not a probe", e)
+		}
+	}
+}
