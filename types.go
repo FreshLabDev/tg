@@ -3,6 +3,11 @@ package tg
 
 import "encoding/json"
 
+// The struct tags mirror Telegram's own required/optional split: a field the
+// API always sends is always marshaled, an optional one only when set. That
+// matters for a bot that stores a message as an audit record -- otherwise the
+// record is mostly nulls this package invented.
+//
 // The types here are the Telegram protocol, nothing more. What a bot does with
 // an attachment — which one counts as speech, in what order to prefer them —
 // is a product decision and lives in the bot.
@@ -11,66 +16,66 @@ type User struct {
 	ID           int64  `json:"id"`
 	IsBot        bool   `json:"is_bot"`
 	FirstName    string `json:"first_name"`
-	LastName     string `json:"last_name"`
-	Username     string `json:"username"`
-	LanguageCode string `json:"language_code"`
+	LastName     string `json:"last_name,omitempty"`
+	Username     string `json:"username,omitempty"`
+	LanguageCode string `json:"language_code,omitempty"`
 }
 
 type Chat struct {
 	ID       int64  `json:"id"`
 	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Username string `json:"username"`
+	Title    string `json:"title,omitempty"`
+	Username string `json:"username,omitempty"`
 }
 
 type Voice struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration"`
-	MimeType     string `json:"mime_type"`
-	FileSize     int64  `json:"file_size"`
+	Duration     int    `json:"duration,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 type VideoNote struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Length       int    `json:"length"`
-	Duration     int    `json:"duration"`
-	FileSize     int64  `json:"file_size"`
+	Length       int    `json:"length,omitempty"`
+	Duration     int    `json:"duration,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 type Audio struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration"`
-	MimeType     string `json:"mime_type"`
-	FileSize     int64  `json:"file_size"`
-	FileName     string `json:"file_name"`
+	Duration     int    `json:"duration,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
 }
 
 type Video struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration"`
-	MimeType     string `json:"mime_type"`
-	FileSize     int64  `json:"file_size"`
-	FileName     string `json:"file_name"`
+	Duration     int    `json:"duration,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
 }
 
 type Document struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	MimeType     string `json:"mime_type"`
-	FileSize     int64  `json:"file_size"`
-	FileName     string `json:"file_name"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
 }
 
 type Photo struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Width        int    `json:"width"`
-	Height       int    `json:"height"`
-	FileSize     int64  `json:"file_size"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 // File is a getFile result. FilePath is relative on Telegram's own server and
@@ -78,31 +83,31 @@ type Photo struct {
 // both.
 type File struct {
 	FileID   string `json:"file_id"`
-	FilePath string `json:"file_path"`
-	FileSize int64  `json:"file_size"`
+	FilePath string `json:"file_path,omitempty"`
+	FileSize int64  `json:"file_size,omitempty"`
 }
 
 type Message struct {
 	MessageID int64 `json:"message_id"`
 	// EphemeralMessageID is non-zero only for a Bot API 10.3 ephemeral message.
-	EphemeralMessageID int64 `json:"ephemeral_message_id"`
-	MessageThreadID    int   `json:"message_thread_id"`
+	EphemeralMessageID int64 `json:"ephemeral_message_id,omitempty"`
+	MessageThreadID    int   `json:"message_thread_id,omitempty"`
 	// From is absent on channel posts, so it is a pointer.
-	From            *User           `json:"from"`
-	ReceiverUser    *User           `json:"receiver_user"`
+	From            *User           `json:"from,omitempty"`
+	ReceiverUser    *User           `json:"receiver_user,omitempty"`
 	Chat            Chat            `json:"chat"`
 	Date            int64           `json:"date"`
-	Text            string          `json:"text"`
+	Text            string          `json:"text,omitempty"`
 	Entities        []MessageEntity `json:"entities,omitempty"`
-	Caption         string          `json:"caption"`
+	Caption         string          `json:"caption,omitempty"`
 	CaptionEntities []MessageEntity `json:"caption_entities,omitempty"`
-	Voice           *Voice          `json:"voice"`
-	VideoNote       *VideoNote      `json:"video_note"`
-	Audio           *Audio          `json:"audio"`
-	Video           *Video          `json:"video"`
-	Document        *Document       `json:"document"`
-	Photo           []Photo         `json:"photo"`
-	ReplyToMessage  *Message        `json:"reply_to_message"`
+	Voice           *Voice          `json:"voice,omitempty"`
+	VideoNote       *VideoNote      `json:"video_note,omitempty"`
+	Audio           *Audio          `json:"audio,omitempty"`
+	Video           *Video          `json:"video,omitempty"`
+	Document        *Document       `json:"document,omitempty"`
+	Photo           []Photo         `json:"photo,omitempty"`
+	ReplyToMessage  *Message        `json:"reply_to_message,omitempty"`
 
 	// Raw is the message exactly as Telegram sent it. This package models the
 	// fields the family uses and no more, so Raw is how a bot reaches a field
@@ -129,7 +134,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 type MessageEntity struct {
 	Type          string `json:"type"`
 	Offset        int    `json:"offset"`
-	Length        int    `json:"length"`
+	Length        int    `json:"length,omitempty"`
 	URL           string `json:"url,omitempty"`
 	User          *User  `json:"user,omitempty"`
 	Language      string `json:"language,omitempty"`
@@ -138,7 +143,7 @@ type MessageEntity struct {
 
 type CallbackQuery struct {
 	ID      string  `json:"id"`
-	From    User    `json:"from"`
+	From    User    `json:"from,omitempty"`
 	Message Message `json:"message"`
 	Data    string  `json:"data"`
 }
@@ -150,7 +155,7 @@ type ChatMember struct {
 
 type ChatMemberUpdated struct {
 	Chat          Chat       `json:"chat"`
-	From          User       `json:"from"`
+	From          User       `json:"from,omitempty"`
 	NewChatMember ChatMember `json:"new_chat_member"`
 }
 
@@ -166,7 +171,7 @@ type InlineKeyboardMarkup struct {
 }
 
 type InlineKeyboardButton struct {
-	Text         string `json:"text"`
+	Text         string `json:"text,omitempty"`
 	CallbackData string `json:"callback_data,omitempty"`
 	URL          string `json:"url,omitempty"`
 	// Style colors the button (Bot API 9.4+). Clients older than 2026-02-09
@@ -205,5 +210,5 @@ type Me struct {
 	ID        int64  `json:"id"`
 	IsBot     bool   `json:"is_bot"`
 	FirstName string `json:"first_name"`
-	Username  string `json:"username"`
+	Username  string `json:"username,omitempty"`
 }

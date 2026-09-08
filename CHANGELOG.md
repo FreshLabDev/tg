@@ -7,6 +7,15 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.4 - 2026-09-08
+
+### Changed
+
+- Struct tags now mirror Telegram's own required/optional split: a field the
+  API always sends is always marshaled, an optional one only when set. A
+  message re-encoded for an audit record used to come out mostly nulls this
+  package had invented.
+
 ## v0.0.1-alpha.3 - 2026-09-08
 
 ### Added
