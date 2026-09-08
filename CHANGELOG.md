@@ -7,6 +7,25 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.2 - 2026-09-08
+
+What the second consumer needed. makeitMD keeps an audit trail of exactly what
+Telegram said and renders Markdown written by people, and neither survived the
+first cut of this package.
+
+### Added
+
+- `Message.Raw` carries the message exactly as Telegram sent it. This package
+  models the fields the family uses and no more, so Raw is how a bot reaches
+  one that is not modeled yet, and how a bot that stores an audit trail keeps
+  what arrived rather than a re-encoding of our struct.
+- `APIError.Response` keeps the error body verbatim, for the same reason.
+- `RichOption` and `WithEntityDetection()`. Rich payloads skip Telegram's
+  entity detection by default, which is right for generated text full of
+  digits and words that are not links -- and wrong for Markdown a person
+  wrote, where a bare URL is meant to become one. The rich senders now take
+  options.
+
 ## v0.0.1-alpha.1 - 2026-09-08
 
 The first cut: the transport that had been living in three bots at once, plus

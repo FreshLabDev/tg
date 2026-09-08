@@ -4,6 +4,7 @@ package tg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -185,5 +186,54 @@ func TestSendMessageIsHTMLWithoutLinkPreview(t *testing.T) {
 	preview, _ := body["link_preview_options"].(map[string]any)
 	if preview["is_disabled"] != true {
 		t.Fatalf("link_preview_options = %v", body["link_preview_options"])
+	}
+}
+
+// A bot that keeps an audit trail stores what Telegram actually said, and a
+// bot needing a field this package does not model reads it out of Raw.
+func TestMessageKeepsItsRawJSON(t *testing.T) {
+	const result = `{"message_id":7,"date":1700000000,"chat":{"id":42,"type":"private"},"text":"hi","some_future_field":{"a":1}}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":` + result + `}`))
+	})
+
+	msg, err := c.SendMessage(context.Background(), 42, "hi", nil)
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if string(msg.Raw) != result {
+		t.Fatalf("Raw = %s\nwant %s", msg.Raw, result)
+	}
+	var reread map[string]any
+	if err := json.Unmarshal(msg.Raw, &reread); err != nil {
+		t.Fatalf("Raw must stay valid JSON: %v", err)
+	}
+	if _, ok := reread["some_future_field"]; !ok {
+		t.Fatal("Raw must carry fields this package does not model")
+	}
+	// A nested message keeps its own bytes too.
+	var upd Update
+	if err := json.Unmarshal([]byte(`{"update_id":1,"message":{"message_id":2,"reply_to_message":{"message_id":1,"text":"orig"}}}`), &upd); err != nil {
+		t.Fatal(err)
+	}
+	if upd.Message.ReplyToMessage == nil || len(upd.Message.ReplyToMessage.Raw) == 0 {
+		t.Fatal("a nested message must keep its raw bytes as well")
+	}
+}
+
+func TestAPIErrorKeepsTheRawBody(t *testing.T) {
+	const body = `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	})
+
+	_, err := c.SendMessage(context.Background(), 1, "x", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error type = %T", err)
+	}
+	if string(apiErr.Response) != body {
+		t.Fatalf("Response = %s, want the body verbatim", apiErr.Response)
 	}
 }

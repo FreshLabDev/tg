@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package tg
 
+import "encoding/json"
+
 // The types here are the Telegram protocol, nothing more. What a bot does with
 // an attachment — which one counts as speech, in what order to prefer them —
 // is a product decision and lives in the bot.
@@ -99,6 +101,24 @@ type Message struct {
 	Document       *Document  `json:"document"`
 	Photo          []Photo    `json:"photo"`
 	ReplyToMessage *Message   `json:"reply_to_message"`
+
+	// Raw is the message exactly as Telegram sent it. This package models the
+	// fields the family uses and no more, so Raw is how a bot reaches a field
+	// that is not modeled yet -- and how one that keeps an audit trail stores
+	// what actually arrived rather than a re-encoding of this struct.
+	Raw json.RawMessage `json:"-"`
+}
+
+func (m *Message) UnmarshalJSON(data []byte) error {
+	// The alias sheds the method set, so decoding does not recurse.
+	type message Message
+	var decoded message
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*m = Message(decoded)
+	m.Raw = append(json.RawMessage(nil), data...)
+	return nil
 }
 
 type CallbackQuery struct {

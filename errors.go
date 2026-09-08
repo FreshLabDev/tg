@@ -23,6 +23,10 @@ type APIError struct {
 	// a supergroup (parameters.migrate_to_chat_id): the old chat_id is dead and
 	// this is the chat_id to use instead.
 	MigrateToChatID int64
+	// Response is the error body as Telegram sent it, for a bot that records
+	// what it was told rather than this package's reading of it. It carries no
+	// token: Telegram does not echo the request.
+	Response json.RawMessage
 }
 
 func (e *APIError) Error() string {
@@ -161,6 +165,9 @@ func parseAPIError(method string, statusCode int, body io.Reader) *APIError {
 		ErrorCode:       payload.ErrorCode,
 		Description:     description,
 		MigrateToChatID: payload.Parameters.MigrateToChatID,
+	}
+	if len(raw) > 0 {
+		apiErr.Response = append(json.RawMessage(nil), raw...)
 	}
 	if payload.Parameters.RetryAfter > 0 {
 		apiErr.RetryAfter = time.Duration(payload.Parameters.RetryAfter) * time.Second

@@ -81,3 +81,32 @@ func TestEditMessageRichHTMLTreatsNotModifiedAsSuccess(t *testing.T) {
 		t.Fatalf("an unchanged edit must not be an error: %v", err)
 	}
 }
+
+// makeitMD renders user-authored Markdown, where a bare URL is expected to
+// become a link. Everything else in the family sends generated text, where it
+// is not.
+func TestEntityDetectionIsOffUnlessAsked(t *testing.T) {
+	handler, _, body := capture(t, `{"ok":true,"result":{"message_id":1}}`)
+	c, _ := newTestClient(t, handler)
+
+	if _, err := c.SendRichMarkdown(context.Background(), 1, "see https://example.test", nil); err != nil {
+		t.Fatalf("SendRichMarkdown: %v", err)
+	}
+	rich, _ := (*body)["rich_message"].(map[string]any)
+	if rich["skip_entity_detection"] != true {
+		t.Fatalf("rich_message = %v, want detection off by default", rich)
+	}
+
+	handler2, _, body2 := capture(t, `{"ok":true,"result":{"message_id":1}}`)
+	c2, _ := newTestClient(t, handler2)
+	if _, err := c2.SendRichMarkdown(context.Background(), 1, "see https://example.test", nil, WithEntityDetection()); err != nil {
+		t.Fatalf("SendRichMarkdown with detection: %v", err)
+	}
+	rich2, _ := (*body2)["rich_message"].(map[string]any)
+	if _, present := rich2["skip_entity_detection"]; present {
+		t.Fatalf("rich_message = %v, want the field absent so Telegram detects entities", rich2)
+	}
+	if rich2["markdown"] != "see https://example.test" {
+		t.Fatalf("markdown = %v", rich2["markdown"])
+	}
+}

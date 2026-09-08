@@ -32,14 +32,14 @@ func (c *Client) SendEphemeralMessage(ctx context.Context, chatID, receiverUserI
 // callbackQueryID ties the overlay to the button tap that asked for it; the
 // public message stays in place because replace_callback_query_message is
 // omitted.
-func (c *Client) SendEphemeralRichHTML(ctx context.Context, chatID, receiverUserID int64, callbackQueryID, body string, markup *InlineKeyboardMarkup) (Message, error) {
+func (c *Client) SendEphemeralRichHTML(ctx context.Context, chatID, receiverUserID int64, callbackQueryID, body string, markup *InlineKeyboardMarkup, opts ...RichOption) (Message, error) {
 	ephemeral := map[string]any{"receiver_user_id": receiverUserID}
 	if callbackQueryID != "" {
 		ephemeral["callback_query_id"] = callbackQueryID
 	}
 	req := map[string]any{
 		"chat_id":                      chatID,
-		"rich_message":                 richHTML(body),
+		"rich_message":                 richHTML(body, opts...),
 		"ephemeral_message_parameters": ephemeral,
 	}
 	if markup != nil {
@@ -60,9 +60,9 @@ func (c *Client) EditEphemeralMessageText(ctx context.Context, chatID, receiverU
 // This is the only way to deliver more than 4096 characters privately: once
 // the work has taken longer than Telegram's reply window, a fresh ephemeral
 // message can no longer be sent.
-func (c *Client) EditEphemeralRichHTML(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, body string, markup *InlineKeyboardMarkup) error {
+func (c *Client) EditEphemeralRichHTML(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, body string, markup *InlineKeyboardMarkup, opts ...RichOption) error {
 	return c.editEphemeral(ctx, chatID, receiverUserID, ephemeralMessageID, map[string]any{
-		"rich_message": richHTML(body),
+		"rich_message": richHTML(body, opts...),
 	}, markup)
 }
 
