@@ -27,13 +27,17 @@ services:
     user: "101:101"
 ```
 
-Three details that are easy to get wrong:
+Four details that are easy to get wrong:
 
 - **Mount only this bot's subdirectory.** The server's data directory holds one
   subdirectory per bot, named after that bot's full token. Mounting the parent
   hands every other bot's credentials to this one.
 - **Use the long volume syntax.** The path contains the token, the token
   contains a colon, and Docker's `source:target` form splits on colons.
+- **Create the directory first, owned by that uid.** Docker creates a missing
+  bind source as `root`, and then neither the server nor the bot can write in
+  it. `Preflight` with `Files: true` catches this at startup, but only after
+  the container is already restarting.
 - **Match the uid.** The server writes as uid 101 with mode 0750. A bot running
   as another user cannot read the file, and cannot delete it afterwards — which
   it must, because a local server never reclaims what it produced.
