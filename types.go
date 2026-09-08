@@ -31,7 +31,7 @@ type Chat struct {
 type Voice struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration,omitempty"`
+	Duration     int    `json:"duration"`
 	MimeType     string `json:"mime_type,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
 }
@@ -39,15 +39,15 @@ type Voice struct {
 type VideoNote struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Length       int    `json:"length,omitempty"`
-	Duration     int    `json:"duration,omitempty"`
+	Length       int    `json:"length"`
+	Duration     int    `json:"duration"`
 	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 type Audio struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration,omitempty"`
+	Duration     int    `json:"duration"`
 	MimeType     string `json:"mime_type,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
 	FileName     string `json:"file_name,omitempty"`
@@ -56,7 +56,9 @@ type Audio struct {
 type Video struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Duration     int    `json:"duration,omitempty"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	Duration     int    `json:"duration"`
 	MimeType     string `json:"mime_type,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
 	FileName     string `json:"file_name,omitempty"`
@@ -73,8 +75,8 @@ type Document struct {
 type Photo struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
-	Width        int    `json:"width,omitempty"`
-	Height       int    `json:"height,omitempty"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
 	FileSize     int64  `json:"file_size,omitempty"`
 }
 
@@ -82,9 +84,12 @@ type Photo struct {
 // absolute on a server started with --local; [Client.DownloadToFile] handles
 // both.
 type File struct {
-	FileID   string `json:"file_id"`
-	FilePath string `json:"file_path,omitempty"`
-	FileSize int64  `json:"file_size,omitempty"`
+	FileID string `json:"file_id"`
+	// FileUniqueID is stable across the file_id rotations Telegram does, so it
+	// is what a bot keyed on identity should store.
+	FileUniqueID string `json:"file_unique_id"`
+	FilePath     string `json:"file_path,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 type Message struct {
@@ -134,7 +139,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 type MessageEntity struct {
 	Type          string `json:"type"`
 	Offset        int    `json:"offset"`
-	Length        int    `json:"length,omitempty"`
+	Length        int    `json:"length"`
 	URL           string `json:"url,omitempty"`
 	User          *User  `json:"user,omitempty"`
 	Language      string `json:"language,omitempty"`
@@ -142,10 +147,18 @@ type MessageEntity struct {
 }
 
 type CallbackQuery struct {
-	ID      string  `json:"id"`
-	From    User    `json:"from,omitempty"`
+	ID   string `json:"id"`
+	From User   `json:"from"`
+	// Message is absent for a callback from an inline message, which none of
+	// the family's bots send today. Reading Chat.ID off a zero value would
+	// address chat 0, so a bot that adds inline mode must make this a pointer
+	// first -- a change every caller has to see, which is why it is written
+	// down rather than made now.
 	Message Message `json:"message"`
-	Data    string  `json:"data"`
+	// ChatInstance identifies the message a callback came from even when
+	// Message is absent.
+	ChatInstance string `json:"chat_instance"`
+	Data         string `json:"data,omitempty"`
 }
 
 type ChatMember struct {
@@ -154,16 +167,21 @@ type ChatMember struct {
 }
 
 type ChatMemberUpdated struct {
-	Chat          Chat       `json:"chat"`
-	From          User       `json:"from,omitempty"`
+	Chat Chat  `json:"chat"`
+	From User  `json:"from"`
+	Date int64 `json:"date"`
+	// OldChatMember is what distinguishes being added to a group from being
+	// promoted inside one, which is the whole reason a bot asks for
+	// my_chat_member.
+	OldChatMember ChatMember `json:"old_chat_member"`
 	NewChatMember ChatMember `json:"new_chat_member"`
 }
 
 type Update struct {
 	UpdateID     int64              `json:"update_id"`
-	Message      *Message           `json:"message"`
-	Callback     *CallbackQuery     `json:"callback_query"`
-	MyChatMember *ChatMemberUpdated `json:"my_chat_member"`
+	Message      *Message           `json:"message,omitempty"`
+	Callback     *CallbackQuery     `json:"callback_query,omitempty"`
+	MyChatMember *ChatMemberUpdated `json:"my_chat_member,omitempty"`
 }
 
 type InlineKeyboardMarkup struct {
@@ -171,7 +189,7 @@ type InlineKeyboardMarkup struct {
 }
 
 type InlineKeyboardButton struct {
-	Text         string `json:"text,omitempty"`
+	Text         string `json:"text"`
 	CallbackData string `json:"callback_data,omitempty"`
 	URL          string `json:"url,omitempty"`
 	// Style colors the button (Bot API 9.4+). Clients older than 2026-02-09

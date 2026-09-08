@@ -38,8 +38,11 @@ type Event struct {
 	Duration time.Duration
 	// Attempt counts from 1.
 	Attempt int
-	// Retried reports whether another attempt will follow this one.
-	Retried bool
+	// Retryable reports whether this failure is of a kind this package retries
+	// -- a transport failure, a 429, a 5xx. It does not promise another attempt
+	// followed: the retry budget may already be spent, and a POST is replayed
+	// only when Telegram asked for it.
+	Retryable bool
 	// Err is the attempt's error, already redacted of the bot token.
 	Err error
 }

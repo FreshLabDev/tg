@@ -7,6 +7,79 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+## v0.0.1-alpha.6 - 2026-09-08
+
+What three reviews of the first day's code found. Two of these were leaks.
+
+### Security
+
+- The bot token no longer escapes through an API error. Telegram never echoes
+  the request, but a proxy or a sidecar answering 404 or 502 in its place
+  quotes the request URI -- which contains the token -- and that string reached
+  log lines and, in branchy, a database column. Descriptions and raw bodies are
+  now redacted like URLs are.
+- The token no longer escapes through a wrapped `fs.PathError` either. A local
+  server names each bot's directory after its token, so every local-file error
+  carried it in `PathError.Path` even though the message itself was clean. The
+  error keeps its identity -- `errors.Is(err, fs.ErrNotExist)` still works --
+  with the path scrubbed.
+- Symlinks can no longer escape `<filesRoot>/<token>`. Cleaning a path stops a
+  `..` and nothing stopped a link, on a directory written by another process
+  and shared with every other bot. Both sides are resolved before comparison.
+
+### Fixed
+
+- A 2xx answer carrying `ok=false` is an `*APIError` again, with its error
+  code, description, retry_after and body. Telegram does not answer that way,
+  but a proxy does -- and callers classify failures by type, so it was arriving
+  as an untyped error that skipped every recovery path. Classification now
+  reads Telegram's own code when the HTTP status does not carry it, which also
+  fixes `answerCallbackQuery`, `setMyCommands` and `editMessageText`, none of
+  which checked `ok` at all.
+- `ErrUnexpectedResult` separates "the call failed" from "the call was made and
+  the answer is unreadable". A bot whose notification was delivered should not
+  queue it again because the receipt did not parse; a bot that needs the new
+  message's id genuinely cannot continue. Such an answer is also no longer
+  retried -- it will not parse differently the second time -- and it now names
+  the method.
+- A failed download no longer leaves a truncated file behind. `os.Create`
+  truncates before the size is known, and a caller that finds a file where an
+  error was reported will read it.
+- `Preflight` waits through the failures a starting server actually produces.
+  It gave up on any API answer, which meant a 502 from a proxy in front of a
+  booting server was fatal; only a refused connection was ever waited out.
+- `Needs.Wait` bounds the whole check rather than only the pauses inside it.
+  With the retries inside `getMe`, a 30-second budget could run for minutes,
+  and an operator sizes a restart policy on that number.
+- A probe survives a dropped connection. An ordinary POST is not replayed
+  because a lost answer may still have been acted on, but a probe carries an
+  empty body, so one reset connection was reading as "the server lacks this
+  method".
+- `Probe` refuses to guess when the server answers 401, 403, or a 404 that is
+  not Telegram's. Those say the server never looked at the method, and
+  reporting it present defeats the point of a guard that exists to refuse.
+- A POST that is asked to wait longer than its caller can afford now returns
+  both facts: what Telegram answered and that the wait was cut short. It used
+  to return only the context error, losing the 429 and its retry_after.
+- The JSON contract matches the API: fields Telegram always sends marshal at
+  their zero value -- an accidentally empty button label was being sent as a
+  button with no label at all -- and an `Update` no longer marshals three
+  nulls. `File.file_unique_id`, `Video.width`/`height`,
+  `ChatMemberUpdated.date`/`old_chat_member` and `CallbackQuery.chat_instance`
+  are modeled; `CallbackQuery.data` is optional, as it is in the API.
+
+### Changed
+
+- `Event.Retried` became `Event.Retryable`. It was computed from the error
+  alone and claimed another attempt would follow, which was untrue for a 5xx on
+  a POST and for the last attempt of an exhausted GET.
+
+### Documentation
+
+- `docs/limitations.md` lists what the package cannot express yet -- multipart
+  uploads, per-chat command scopes, inline-message editing, an extensible probe
+  list -- so the next consumer meets them on paper rather than in the source.
+
 ## v0.0.1-alpha.5 - 2026-09-08
 
 ### Added

@@ -116,8 +116,8 @@ func TestObserverSeesEveryAttempt(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("observed %d attempts, want 2", len(events))
 	}
-	if events[0].Status != 500 || events[0].Attempt != 1 || !events[0].Retried {
-		t.Fatalf("first event = %+v, want a retried 500 on attempt 1", events[0])
+	if events[0].Status != 500 || events[0].Attempt != 1 || !events[0].Retryable {
+		t.Fatalf("first event = %+v, want a retryable 500 on attempt 1", events[0])
 	}
 	if events[1].Status != 200 || events[1].Err != nil || events[1].Method != "getMe" {
 		t.Fatalf("second event = %+v, want a clean getMe", events[1])
@@ -260,5 +260,51 @@ func TestSendPlainTextHasNoParseMode(t *testing.T) {
 	preview, _ := body["link_preview_options"].(map[string]any)
 	if preview["is_disabled"] != true {
 		t.Fatal("previews stay off for the fallback too")
+	}
+}
+
+// Telegram accepted the request and acted on it; only the receipt is
+// unreadable. A caller that must not repeat itself needs to tell that apart
+// from a refusal.
+func TestUnreadableResultIsNotARefusal(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	})
+
+	_, err := c.SendMessage(context.Background(), 1, "delivered", nil)
+	if err == nil {
+		t.Fatal("want an error: the caller asked for a message and got none")
+	}
+	if !errors.Is(err, ErrUnexpectedResult) {
+		t.Fatalf("err = %v, want it to wrap ErrUnexpectedResult", err)
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		t.Fatal("an unreadable result is not an API refusal")
+	}
+	if !strings.Contains(err.Error(), "sendMessage") {
+		t.Fatalf("err = %v, want the method named", err)
+	}
+}
+
+// The three methods that answer with a bare true were not checking ok at all.
+func TestOKFalseIsCaughtForMethodsWithNoResult(t *testing.T) {
+	for _, method := range []string{"answerCallbackQuery", "setMyCommands", "editMessageText"} {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: refused"}`))
+		})
+		var err error
+		switch method {
+		case "answerCallbackQuery":
+			err = c.AnswerCallbackQuery(context.Background(), "cb", "")
+		case "setMyCommands":
+			err = c.SetMyCommands(context.Background(), []BotCommand{{Command: "start"}})
+		case "editMessageText":
+			err = c.EditMessageText(context.Background(), 1, 2, "text", nil)
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("%s: err = %v, want an *APIError", method, err)
+		}
 	}
 }

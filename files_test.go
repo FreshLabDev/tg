@@ -4,6 +4,7 @@ package tg
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -156,5 +157,76 @@ func TestGetFileRejectsAnEmptyPath(t *testing.T) {
 	})
 	if _, err := c.GetFile(context.Background(), "x"); err == nil {
 		t.Fatal("want an error for a result without file_path")
+	}
+}
+
+// The directory is written by another process on a volume shared with every
+// other bot. Cleaning the path stops a "..", and nothing else stops a link.
+func TestDownloadRefusesASymlinkOutOfTheBotDirectory(t *testing.T) {
+	root, _ := localServerDir(t, "file_0.mp4", []byte("ours"))
+	outside := filepath.Join(t.TempDir(), "someone-elses-session")
+	if err := os.WriteFile(outside, []byte("another bot's td.binlog"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, testToken, "video_notes", "escape.mp4")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	c, _ := newTestClient(t, nil, WithLocalFiles(root))
+
+	dst := filepath.Join(t.TempDir(), "out")
+	err := c.DownloadToFile(context.Background(), link, dst, 1<<20)
+	if err == nil {
+		t.Fatal("a symlink leading out of the bot's directory must be refused")
+	}
+	if !strings.Contains(err.Error(), "outside this bot's directory") {
+		t.Fatalf("message = %q", err.Error())
+	}
+	if _, statErr := os.Stat(dst); statErr == nil {
+		t.Fatal("nothing may be written when the path is refused")
+	}
+	if _, statErr := os.Stat(outside); statErr != nil {
+		t.Fatal("the target must be left alone")
+	}
+}
+
+// A caller that finds a file where an error was reported will process it.
+func TestARejectedDownloadLeavesNoFile(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", 5000)))
+	})
+
+	dst := filepath.Join(t.TempDir(), "out.oga")
+	if err := c.DownloadToFile(context.Background(), "voice/file_1.oga", dst, 100); !errors.Is(err, ErrFileTooLarge) {
+		t.Fatalf("err = %v, want ErrFileTooLarge", err)
+	}
+	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a truncated file was left at dst (stat err = %v)", err)
+	}
+}
+
+// fs.PathError carries the path, and on a local server the path is the token.
+func TestLocalFileErrorsKeepTheirKindWithoutTheToken(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, testToken), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := newTestClient(t, nil, WithLocalFiles(root))
+
+	err := c.DownloadToFile(context.Background(),
+		filepath.Join(root, testToken, "voice", "missing.oga"),
+		filepath.Join(t.TempDir(), "out"), 1<<20)
+	if err == nil {
+		t.Fatal("want an error for a missing file")
+	}
+	if strings.Contains(err.Error(), testToken) {
+		t.Fatalf("token leaked: %q", err.Error())
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) && strings.Contains(pathErr.Path, testToken) {
+		t.Fatalf("token leaked through the wrapped cause: %q", pathErr.Path)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("the error must still say what kind of failure it was")
 	}
 }
