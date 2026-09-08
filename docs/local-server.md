@@ -19,15 +19,21 @@ So the directory has to be reachable from the bot:
 services:
   bot:
     volumes:
-      - ${BOT_API_DIR}/${TELEGRAM_BOT_TOKEN}:/var/lib/telegram-bot-api/${TELEGRAM_BOT_TOKEN}
+      # Long syntax, not "source:target": a bot token contains a colon, and
+      # the short form splits on colons ("too many colons").
+      - type: bind
+        source: ${BOT_API_DIR}/${TELEGRAM_BOT_TOKEN}
+        target: /var/lib/telegram-bot-api/${TELEGRAM_BOT_TOKEN}
     user: "101:101"
 ```
 
-Two details that are easy to get wrong:
+Three details that are easy to get wrong:
 
 - **Mount only this bot's subdirectory.** The server's data directory holds one
   subdirectory per bot, named after that bot's full token. Mounting the parent
   hands every other bot's credentials to this one.
+- **Use the long volume syntax.** The path contains the token, the token
+  contains a colon, and Docker's `source:target` form splits on colons.
 - **Match the uid.** The server writes as uid 101 with mode 0750. A bot running
   as another user cannot read the file, and cannot delete it afterwards — which
   it must, because a local server never reclaims what it produced.
