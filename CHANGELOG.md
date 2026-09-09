@@ -13,10 +13,18 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
-## v0.1.0-alpha.2 - 2026-09-09
+## v0.1.0 - 2026-09-09
 
-Documentation only. The link-preview fix landed before alpha.1 was tagged and
-shipped with it; this is the deployment note that went in afterwards.
+The first stable release of the 0.1.0 line, summarising it rather than only the
+delta since alpha.1.
+
+tg gained the surface searchy needed to leave its third-party client: media
+sends, inline mode, link-preview control and the chat and action constants that
+went with them. Nothing that already existed moved, so the three bots already on
+this module are unaffected by any of it.
+
+Below, the entries added after alpha.1 was tagged. The media and inline work is
+described in the alpha.1 section.
 
 ### Added
 
