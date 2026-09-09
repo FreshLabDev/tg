@@ -1,6 +1,6 @@
 <h1 align="center">tg</h1>
 
-<p align="center"><strong>One Telegram Bot API client for the FreshLab bots.</strong><br/>Standard library only, local Bot API server included, and it refuses to start against a server that cannot serve it.</p>
+<p align="center"><strong>One Telegram Bot API client for the Asterfield bots.</strong><br/>Standard library only, local Bot API server included, and it refuses to start against a server that cannot serve it.</p>
 
 <p align="center">
   <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.0.1--alpha.1-26A5E4?style=for-the-badge&labelColor=0f172a" alt="version"></a>
@@ -21,7 +21,7 @@
 
 ## Why
 
-Three FreshLab bots each carried their own HTTP client to the same API. The
+Three Asterfield bots each carried their own HTTP client to the same API. The
 transport matched function for function — `get`, `post`, `attempt`, `do`,
 `redactError`, `parseAPIError`, `retryDelay` — and had already drifted: one
 counted metrics, one wrapped errors differently, and only one knew about a
