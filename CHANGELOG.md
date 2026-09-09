@@ -44,6 +44,15 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
   answer an inline query. Everything above is additive — no existing signature
   moved.
 
+### Fixed
+
+- `EditEphemeralMessageText` suppresses Telegram's own link preview, which it
+  alone among the text sends did not. The About panel every bot is growing
+  carries a repository link, so editing one in place rendered a preview card
+  under it — in a group, where an ephemeral panel exists precisely to be the
+  quiet option. `SendEphemeralMessage` already did this; the rich sends do not,
+  ephemeral or not, which is consistent between them and left alone here.
+
 ### Changed
 
 - One versioning and release document for the whole family. `docs/versioning.md`

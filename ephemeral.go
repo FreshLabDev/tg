@@ -48,11 +48,16 @@ func (c *Client) SendEphemeralRichHTML(ctx context.Context, chatID, receiverUser
 	return c.sendRichMessage(ctx, req)
 }
 
-// EditEphemeralMessageText replaces the text of an ephemeral message.
+// EditEphemeralMessageText replaces the text of an ephemeral message. Like
+// every other text this package sends, it suppresses Telegram's own preview of
+// a link inside it: an About panel carrying a repository link would otherwise
+// grow a preview card under it, and in a group that card is the loudest thing
+// on screen.
 func (c *Client) EditEphemeralMessageText(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, text string, markup *InlineKeyboardMarkup) error {
 	return c.editEphemeral(ctx, chatID, receiverUserID, ephemeralMessageID, map[string]any{
-		"text":       text,
-		"parse_mode": "HTML",
+		"text":                 text,
+		"parse_mode":           "HTML",
+		"link_preview_options": noLinkPreview,
 	}, markup)
 }
 
