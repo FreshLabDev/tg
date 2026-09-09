@@ -92,6 +92,28 @@ the whole rollback — and then publish a new patch that fixes what went wrong.
 A version that was published is a fact about what existed. Rewriting it makes
 every other record of it wrong.
 
+## Deploying
+
+Nothing. tg is a library — it has no container, no stack and no host.
+
+It reaches production when a bot bumps its dependency and that bot is deployed,
+which means a change here is only as proven as the bots that have shipped on it.
+That is why the stage names in [`versioning.md`](versioning.md) are about the
+consumers rather than about this repository: `beta` means every bot has been
+moved and none of them broke.
+
+After tagging, a consumer picks it up with:
+
+```sh
+go get github.com/FreshLabDev/tg@<tag>
+go mod tidy
+```
+
+The module proxy caches a tag permanently on first fetch, so a tag cannot be
+taken back or moved. That is also why the release workflow refuses a tag that is
+not on the branch its channel publishes from — by the time anyone notices, the
+wrong version is already immutable.
+
 ## Verification
 
 ```sh

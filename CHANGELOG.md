@@ -20,6 +20,14 @@ existed moved, so every bot already on tg is unaffected; the version says
 
 ### Added
 
+- `docs/releases.md` gained a **Deploying** section, and `AGENTS.md` points at it.
+  Releasing was documented; deploying was not, in any repository in the family —
+  the process stopped at "deploy it" and never said how. That gap mattered more
+  after the stacks moved from building on the host to pulling a published image,
+  because the procedure changed on the same day. The section names this stack's
+  host directory, its env file, the variable that selects the image, the networks
+  it needs, and what a rollback actually is.
+
 - **Media sends.** `SendPhoto`, `SendVideo`, `SendAudio`, `SendDocument` and
   `SendMediaGroup`, plus `EditMessageMedia` and `EditMessageReplyMarkup`. A file
   is an `InputFile`, and which of the three shapes it takes decides the request
