@@ -11,6 +11,39 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
+### Added
+
+- **Media sends.** `SendPhoto`, `SendVideo`, `SendAudio`, `SendDocument` and
+  `SendMediaGroup`, plus `EditMessageMedia` and `EditMessageReplyMarkup`. A file
+  is an `InputFile`, and which of the three shapes it takes decides the request
+  on its own: `InputFileString` for a `file_id` or an https URL Telegram fetches
+  itself, `InputFileLocal` for a path on the disk of a server started with
+  `--local`, and `InputFileUpload` for bytes — only the last builds a multipart
+  body. A local path sent to Telegram's own endpoint is refused before the
+  request, because the failure it would otherwise produce ("wrong file
+  identifier") points nowhere near the cause.
+- **Inline mode.** `AnswerInlineQuery`, the `InlineQuery` and
+  `ChosenInlineResult` update kinds, and the two result cards the family uses:
+  `InlineQueryResultPhoto` and `InlineQueryResultArticle` with
+  `InputTextMessageContent`. Answering with an empty result list is now
+  expressible, and `results` is always sent, because an omitted parameter is a
+  400 rather than "nothing found".
+- `LinkPreviewOptions` as a type, `SendTextWithPreview` for the one case where a
+  bot relays text whose author wanted the preview, and `AnswerCallbackQueryURL`
+  for a button that opens a `t.me` deep link with no intermediate message.
+- `ChatAction*` and `Chat*` constants, so a bot branching on chat type or
+  announcing an upload no longer spells the strings out at every call site.
+- `InlineKeyboardButton.SwitchInlineQueryCurrentChat`. It is a pointer because
+  the empty string is the useful value — "open inline search with nothing
+  typed" — and `omitempty` on a plain string would drop exactly that button.
+- `editMessageMedia` and `sendMediaGroup` are now probe-safe, so a bot that
+  pages a gallery or posts an album can refuse to start on a server that cannot.
+
+  This is why the whole set landed: searchy was the one bot still on a
+  third-party library, and it stayed there because tg could not send a photo or
+  answer an inline query. Everything above is additive — no existing signature
+  moved.
+
 ### Changed
 
 - One versioning and release document for the whole family. `docs/versioning.md`

@@ -6,11 +6,15 @@ reading the source.
 
 ## Missing capabilities
 
-- **No multipart uploads.** `Call` marshals JSON, and nothing in the package
-  builds a multipart body, so a file can be downloaded but not sent. Note that
-  `probeSafe` accepts `sendAudio`, `sendDocument`, `sendPhoto`, `sendVideo` and
-  `sendVoice`: a bot can assert those exist on the server and still have no way
-  to call them. Sending media is the obvious next thing voicy will want.
+- **An upload is held whole in memory.** `postMultipart` assembles the body in
+  a buffer rather than streaming it through an `io.Pipe`, because a POST is
+  replayed when Telegram answers `Retry-After` and a pipe cannot be rewound. So
+  a send is bounded by what the process can hold; anything genuinely large
+  belongs on a self-hosted server, where `InputFileLocal` hands over a path
+  instead of bytes.
+- **`sendVoice`, `sendVideoNote` and `sendAnimation` have no method.**
+  `probeSafe` accepts `sendVoice`, so a bot can assert it exists on the server
+  and still have to reach it through `Call`.
 - **`Probe` cannot be extended by a caller.** The safe list is unexported, and
   `Probe` refuses anything outside it. `Call` exists so a bot is never blocked
   on a release for a missing method; `Probe` has no equivalent, so naming a new
@@ -22,18 +26,24 @@ reading the source.
   editing is out of reach until the signature changes.
 - **`CallbackQuery.Message` is a value, not a pointer.** Telegram omits it for
   a callback from an inline message, and a zero value there reads as chat 0
-  rather than as absence. No bot in the family sends inline messages today;
-  the first one to do so has to make this a pointer, which every caller sees.
+  rather than as absence. Searchy does send inline messages, but only ever with
+  URL buttons, so no callback can arrive without a message today; a bot that
+  puts `callback_data` on an inline result has to make this a pointer first,
+  which every caller sees. Until then, `cq.Message.MessageID == 0` is the
+  check.
 - **Downloads are invisible to the `Observer`.** On a self-hosted server a
   download is the largest and slowest thing a bot does, and it emits no event.
 
 ## Deliberate rigidity
 
 - **`SendMessage` always sends HTML with link previews off**, and
-  `SendPlainText` is a second method rather than an option. There is no way to
-  ask for a link preview, MarkdownV2, `disable_notification` or
-  `protect_content` without dropping to `Call` and losing the typed return. A
-  third variant should become options rather than a third method.
+  `SendPlainText` and `SendTextWithPreview` are further methods rather than
+  options. There is no way to ask for MarkdownV2, `disable_notification` or
+  `protect_content` without dropping to `Call` and losing the typed return. The
+  next variant should become options rather than a fourth method.
+- **A caption is always HTML, and an inline result's caption always declares
+  it.** A caller sending a caption assembled from user-controlled text has to
+  escape it, exactly as it would for `SendMessage`.
 - **`SendRichMarkdown` takes no reply or thread**, while `SendRichHTML` does.
   Asymmetric for no protocol reason.
 - **`GetUpdates` exposes no `limit`, and cannot send a negative offset**, so

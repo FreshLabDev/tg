@@ -178,11 +178,52 @@ type ChatMemberUpdated struct {
 }
 
 type Update struct {
-	UpdateID     int64              `json:"update_id"`
-	Message      *Message           `json:"message,omitempty"`
-	Callback     *CallbackQuery     `json:"callback_query,omitempty"`
-	MyChatMember *ChatMemberUpdated `json:"my_chat_member,omitempty"`
+	UpdateID           int64               `json:"update_id"`
+	Message            *Message            `json:"message,omitempty"`
+	Callback           *CallbackQuery      `json:"callback_query,omitempty"`
+	MyChatMember       *ChatMemberUpdated  `json:"my_chat_member,omitempty"`
+	InlineQuery        *InlineQuery        `json:"inline_query,omitempty"`
+	ChosenInlineResult *ChosenInlineResult `json:"chosen_inline_result,omitempty"`
 }
+
+// LinkPreviewOptions controls Telegram's own preview of a link in a message.
+// Everything this package sends disables it by default: a bot's message is
+// usually the content, and a preview of a URL inside it is noise that also
+// changes the message's height under the reader.
+type LinkPreviewOptions struct {
+	IsDisabled bool `json:"is_disabled,omitempty"`
+	// URL previews a different link than the first one in the text.
+	URL              string `json:"url,omitempty"`
+	PreferSmallMedia bool   `json:"prefer_small_media,omitempty"`
+	PreferLargeMedia bool   `json:"prefer_large_media,omitempty"`
+	ShowAboveText    bool   `json:"show_above_text,omitempty"`
+}
+
+// Chat actions, the "…is typing" line under a chat title. Telegram clears one
+// after five seconds, so anything longer has to repeat it.
+const (
+	ChatActionTyping          = "typing"
+	ChatActionUploadPhoto     = "upload_photo"
+	ChatActionRecordVideo     = "record_video"
+	ChatActionUploadVideo     = "upload_video"
+	ChatActionRecordVoice     = "record_voice"
+	ChatActionUploadVoice     = "upload_voice"
+	ChatActionUploadDocument  = "upload_document"
+	ChatActionChooseSticker   = "choose_sticker"
+	ChatActionFindLocation    = "find_location"
+	ChatActionRecordVideoNote = "record_video_note"
+	ChatActionUploadVideoNote = "upload_video_note"
+)
+
+// Chat types, as Telegram reports them in [Chat.Type]. A bot that behaves
+// differently in a group than in a DM compares against these rather than
+// spelling the strings out at every branch.
+const (
+	ChatPrivate    = "private"
+	ChatGroup      = "group"
+	ChatSupergroup = "supergroup"
+	ChatChannel    = "channel"
+)
 
 type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
@@ -192,6 +233,11 @@ type InlineKeyboardButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data,omitempty"`
 	URL          string `json:"url,omitempty"`
+	// SwitchInlineQueryCurrentChat opens inline mode in the chat the button is
+	// in, with this string already typed. It is a pointer because the empty
+	// string is the useful value -- "open inline search with nothing typed" --
+	// and omitempty would drop exactly that.
+	SwitchInlineQueryCurrentChat *string `json:"switch_inline_query_current_chat,omitempty"`
 	// Style colors the button (Bot API 9.4+). Clients older than 2026-02-09
 	// render it as a normal button, so it degrades gracefully.
 	Style string `json:"style,omitempty"`

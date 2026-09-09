@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -62,14 +65,79 @@ func (c *Client) getWithTimeout(ctx context.Context, method string, values url.V
 	return lastErr
 }
 
-// post sends a JSON body. A POST is replayed only when Telegram itself asked
-// for it with Retry-After: any other failure may have been delivered, and a
-// second send would duplicate a message.
+// post sends a JSON body.
 func (c *Client) post(ctx context.Context, method string, body any, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
+	return c.postBody(ctx, method, "application/json", raw, out)
+}
+
+// postMultipart sends a request that carries files. Telegram reads scalar
+// parameters as text and everything else as JSON once the body stops being
+// JSON, which is how reply_markup and a media array still travel.
+//
+// The whole body is assembled in memory rather than streamed through an
+// io.Pipe, because a POST can be replayed when Telegram answers with
+// Retry-After and a pipe cannot be rewound. That bounds an upload by what the
+// process can hold: anything genuinely large belongs on a self-hosted server,
+// where [InputFileLocal] hands over a path instead of bytes.
+func (c *Client) postMultipart(ctx context.Context, method string, fields map[string]any, files []attachment, out any) error {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	// Sorted, so one request produces one body: a test reading the parts back
+	// and a human reading a capture should not depend on map iteration order.
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		text, err := formValue(fields[name])
+		if err != nil {
+			return fmt.Errorf("encode %s: %w", name, err)
+		}
+		if err := form.WriteField(name, text); err != nil {
+			return err
+		}
+	}
+	for _, file := range files {
+		part, err := form.CreateFormFile(file.field, file.filename)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(part, file.data); err != nil {
+			return fmt.Errorf("read %s: %w", file.field, err)
+		}
+	}
+	if err := form.Close(); err != nil {
+		return err
+	}
+	return c.postBody(ctx, method, form.FormDataContentType(), body.Bytes(), out)
+}
+
+// formValue renders one multipart field the way Telegram parses it.
+func formValue(value any) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case bool:
+		return strconv.FormatBool(typed), nil
+	case int:
+		return strconv.Itoa(typed), nil
+	case int64:
+		return strconv.FormatInt(typed, 10), nil
+	default:
+		raw, err := json.Marshal(value)
+		return string(raw), err
+	}
+}
+
+// postBody sends one prepared body. A POST is replayed only when Telegram
+// itself asked for it with Retry-After: any other failure may have been
+// delivered, and a second send would duplicate a message.
+func (c *Client) postBody(ctx context.Context, method, contentType string, raw []byte, out any) error {
 	var lastErr error
 	for attempt := 1; attempt <= 2; attempt++ {
 		retryAfter, err := c.attempt(ctx, c.timeout, func(attemptCtx context.Context) (*http.Request, error) {
@@ -77,7 +145,7 @@ func (c *Client) post(ctx context.Context, method string, body any, out any) err
 			if err != nil {
 				return nil, err
 			}
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", contentType)
 			return req, nil
 		}, method, out, attempt)
 		if err == nil {

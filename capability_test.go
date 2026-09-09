@@ -276,3 +276,25 @@ func TestProbeEventsAreMarked(t *testing.T) {
 		}
 	}
 }
+
+// Every method this package sends should be probeable, or a bot cannot refuse
+// to start on a server that lacks it -- which is the whole point of Preflight.
+func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: chat_id is empty"}`))
+	})
+
+	// The media and inline surface, which is what searchy cannot run without.
+	methods := []string{
+		"answerInlineQuery", "editMessageMedia", "editMessageReplyMarkup",
+		"sendAudio", "sendDocument", "sendMediaGroup", "sendPhoto", "sendVideo",
+	}
+	missing, err := c.Probe(context.Background(), methods...)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want none: a 400 on an empty body means the method is there", missing)
+	}
+}

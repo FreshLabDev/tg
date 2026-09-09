@@ -110,6 +110,7 @@ bot's token, so mounting the whole thing would hand those over. See
 | protocol types | domain types (delivery bookkeeping, jobs) |
 | methods the family uses, plus `Call` for the rest | formatting decisions |
 | rich messages and the 10.3 ephemeral contract | when to split a message |
+| media sends, uploads and inline answers | which result is worth showing |
 | files, including `--local` | how long to keep a transcript |
 | capability probe and preflight | metrics naming (the module emits `Event`) |
 
