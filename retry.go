@@ -15,9 +15,14 @@ import (
 func retryableError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+		return apiErr.code() == 429 || apiErr.code() >= 500
 	}
-	return !errors.Is(err, context.Canceled)
+	// An answer this package could not read will read the same way next time,
+	// and a canceled caller does not want another attempt.
+	if errors.Is(err, ErrUnexpectedResult) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	return true
 }
 
 // retryDelay backs off 500ms, 1s, 2s (jittered): transient hiccups recover fast

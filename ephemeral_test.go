@@ -75,3 +75,34 @@ func TestEditEphemeralRichHTMLSendsTheFlatReceiver(t *testing.T) {
 		t.Fatalf("rich_message = %v", rich)
 	}
 }
+
+// Every text this package sends suppresses Telegram's own link preview, and an
+// ephemeral edit is the one place that had been forgotten. An About panel
+// carrying a repository link renders the preview card under it otherwise --
+// in a group, where the panel is meant to be the quiet option.
+func TestEphemeralTextSuppressesLinkPreviewsLikeEveryOtherSend(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"send", func(c *Client) error {
+			_, err := c.SendEphemeralMessage(context.Background(), 1, 2, 3, `see <a href="https://github.com/FreshLabDev/tg">the source</a>`, nil)
+			return err
+		}},
+		{"edit", func(c *Client) error {
+			return c.EditEphemeralMessageText(context.Background(), 1, 2, 3, `see <a href="https://github.com/FreshLabDev/tg">the source</a>`, nil)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler, _, body := capture(t, `{"ok":true,"result":{"message_id":5}}`)
+			c, _ := newTestClient(t, handler)
+			if err := test.call(c); err != nil {
+				t.Fatalf("%s: %v", test.name, err)
+			}
+			preview, _ := (*body)["link_preview_options"].(map[string]any)
+			if preview["is_disabled"] != true {
+				t.Fatalf("link_preview_options = %v, want the preview off", (*body)["link_preview_options"])
+			}
+		})
+	}
+}

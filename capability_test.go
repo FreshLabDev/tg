@@ -106,11 +106,11 @@ func TestPreflightFailsOnAServerThatCannotServeTheBot(t *testing.T) {
 func TestPreflightWaitsForAServerThatIsStillStarting(t *testing.T) {
 	var calls atomic.Int32
 	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) < 3 {
-			// Simulate "connection refused" as a 502 from the stub's own view;
-			// the real case is a transport error, exercised below by closing.
+		// More failures than one GetMe absorbs internally (four attempts), so
+		// the waiting loop itself has to run for this to pass.
+		if calls.Add(1) <= 6 {
 			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"ok":false,"description":"Bad Gateway"}`))
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":502,"description":"Bad Gateway"}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"bot"}}`))
@@ -142,5 +142,159 @@ func TestPreflightDoesNotWaitOnARejectedToken(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("calls = %d, want 1", calls.Load())
+	}
+}
+
+// A self-hosted server that is still starting answers with a connection
+// failure or a 5xx; a wrong token answers 401. Only the first is worth waiting
+// on, and the earlier code waited on neither.
+func TestPreflightWaitsThroughTransientAPIErrors(t *testing.T) {
+	var calls atomic.Int32
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":503,"description":"Service Unavailable"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"bot"}}`))
+	})
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+
+	me, err := c.Preflight(context.Background(), Needs{Wait: time.Minute})
+	if err != nil {
+		t.Fatalf("Preflight through a 503: %v", err)
+	}
+	if me.Username != "bot" {
+		t.Fatalf("username = %q", me.Username)
+	}
+}
+
+// A probe carries an empty body, so the method cannot have run. One dropped
+// connection must not read as "the server lacks this method".
+func TestProbeRetriesADroppedConnection(t *testing.T) {
+	var calls atomic.Int32
+	c, srv := newTestClient(t, nil)
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			// Hang up without answering.
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("test server cannot hijack")
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message text is empty"}`))
+	})
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+
+	missing, err := c.Probe(context.Background(), "sendMessage")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want none: the method answered on the retry", missing)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("calls = %d, want the probe replayed", calls.Load())
+	}
+}
+
+// A rejected token is an answer about the caller, not about the method. The
+// server never looked, so reporting "everything is present" would defeat the
+// point of a guard whose job is to refuse to start.
+func TestProbeRefusesToGuessWhenCredentialsAreRejected(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
+	})
+
+	missing, err := c.Probe(context.Background(), "sendRichMessage")
+	if err == nil {
+		t.Fatalf("missing = %v, err = nil: a 401 must not read as 'the method is there'", missing)
+	}
+	if !strings.Contains(err.Error(), "cannot tell") {
+		t.Fatalf("message = %q", err.Error())
+	}
+}
+
+// Wait is what an operator sizes a restart policy on, so it has to bound the
+// whole startup check rather than only the pauses inside it.
+func TestPreflightWaitBoundsTheWholeCheck(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":502,"description":"Bad Gateway"}`))
+	})
+	// Real sleeps here: the point is the wall clock.
+	started := time.Now()
+	_, err := c.Preflight(context.Background(), Needs{Wait: 300 * time.Millisecond})
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("want the failure surfaced")
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("took %s for a 300ms budget", elapsed)
+	}
+}
+
+// A probe calls a method with an empty body on purpose and is answered with a
+// parameter error. Counted as a failure, that is one phantom incident per
+// probed method on every start -- which is exactly what showed up in voicy's
+// metrics after a restart.
+func TestProbeEventsAreMarked(t *testing.T) {
+	var events []Event
+	c, _ := newTestClient(t, oldServer(map[string]bool{"sendMessage": true}),
+		WithObserver(func(e Event) { events = append(events, e) }))
+
+	if _, err := c.Probe(context.Background(), "sendMessage"); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("the probe made no observable request")
+	}
+	for _, e := range events {
+		if !e.Probe {
+			t.Fatalf("event %+v is not marked as a probe", e)
+		}
+	}
+
+	events = nil
+	if _, err := c.SendMessage(context.Background(), 1, "real work", nil); err == nil {
+		t.Fatal("the stub refuses everything; expected an error")
+	}
+	for _, e := range events {
+		if e.Probe {
+			t.Fatalf("event %+v is work the bot asked for, not a probe", e)
+		}
+	}
+}
+
+// Every method this package sends should be probeable, or a bot cannot refuse
+// to start on a server that lacks it -- which is the whole point of Preflight.
+func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: chat_id is empty"}`))
+	})
+
+	// The media and inline surface, which is what searchy cannot run without.
+	methods := []string{
+		"answerInlineQuery", "editMessageMedia", "editMessageReplyMarkup",
+		"sendAudio", "sendDocument", "sendMediaGroup", "sendPhoto", "sendVideo",
+	}
+	missing, err := c.Probe(context.Background(), methods...)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("missing = %v, want none: a 400 on an empty body means the method is there", missing)
 	}
 }

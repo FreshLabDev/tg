@@ -4,6 +4,7 @@ package tg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -115,8 +116,8 @@ func TestObserverSeesEveryAttempt(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("observed %d attempts, want 2", len(events))
 	}
-	if events[0].Status != 500 || events[0].Attempt != 1 || !events[0].Retried {
-		t.Fatalf("first event = %+v, want a retried 500 on attempt 1", events[0])
+	if events[0].Status != 500 || events[0].Attempt != 1 || !events[0].Retryable {
+		t.Fatalf("first event = %+v, want a retryable 500 on attempt 1", events[0])
 	}
 	if events[1].Status != 200 || events[1].Err != nil || events[1].Method != "getMe" {
 		t.Fatalf("second event = %+v, want a clean getMe", events[1])
@@ -185,5 +186,125 @@ func TestSendMessageIsHTMLWithoutLinkPreview(t *testing.T) {
 	preview, _ := body["link_preview_options"].(map[string]any)
 	if preview["is_disabled"] != true {
 		t.Fatalf("link_preview_options = %v", body["link_preview_options"])
+	}
+}
+
+// A bot that keeps an audit trail stores what Telegram actually said, and a
+// bot needing a field this package does not model reads it out of Raw.
+func TestMessageKeepsItsRawJSON(t *testing.T) {
+	const result = `{"message_id":7,"date":1700000000,"chat":{"id":42,"type":"private"},"text":"hi","some_future_field":{"a":1}}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":` + result + `}`))
+	})
+
+	msg, err := c.SendMessage(context.Background(), 42, "hi", nil)
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if string(msg.Raw) != result {
+		t.Fatalf("Raw = %s\nwant %s", msg.Raw, result)
+	}
+	var reread map[string]any
+	if err := json.Unmarshal(msg.Raw, &reread); err != nil {
+		t.Fatalf("Raw must stay valid JSON: %v", err)
+	}
+	if _, ok := reread["some_future_field"]; !ok {
+		t.Fatal("Raw must carry fields this package does not model")
+	}
+	// A nested message keeps its own bytes too.
+	var upd Update
+	if err := json.Unmarshal([]byte(`{"update_id":1,"message":{"message_id":2,"reply_to_message":{"message_id":1,"text":"orig"}}}`), &upd); err != nil {
+		t.Fatal(err)
+	}
+	if upd.Message.ReplyToMessage == nil || len(upd.Message.ReplyToMessage.Raw) == 0 {
+		t.Fatal("a nested message must keep its raw bytes as well")
+	}
+}
+
+func TestAPIErrorKeepsTheRawBody(t *testing.T) {
+	const body = `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	})
+
+	_, err := c.SendMessage(context.Background(), 1, "x", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error type = %T", err)
+	}
+	if string(apiErr.Response) != body {
+		t.Fatalf("Response = %s, want the body verbatim", apiErr.Response)
+	}
+}
+
+// The fallback send must not carry a parse mode: the point of it is that
+// nothing about the text can make Telegram refuse the message.
+func TestSendPlainTextHasNoParseMode(t *testing.T) {
+	var body map[string]any
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	})
+
+	if _, err := c.SendPlainText(context.Background(), 42, "<b>not markup</b>"); err != nil {
+		t.Fatalf("SendPlainText: %v", err)
+	}
+	if _, present := body["parse_mode"]; present {
+		t.Fatalf("parse_mode = %v, want it absent", body["parse_mode"])
+	}
+	if body["text"] != "<b>not markup</b>" {
+		t.Fatalf("text = %v, want it sent verbatim", body["text"])
+	}
+	preview, _ := body["link_preview_options"].(map[string]any)
+	if preview["is_disabled"] != true {
+		t.Fatal("previews stay off for the fallback too")
+	}
+}
+
+// Telegram accepted the request and acted on it; only the receipt is
+// unreadable. A caller that must not repeat itself needs to tell that apart
+// from a refusal.
+func TestUnreadableResultIsNotARefusal(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	})
+
+	_, err := c.SendMessage(context.Background(), 1, "delivered", nil)
+	if err == nil {
+		t.Fatal("want an error: the caller asked for a message and got none")
+	}
+	if !errors.Is(err, ErrUnexpectedResult) {
+		t.Fatalf("err = %v, want it to wrap ErrUnexpectedResult", err)
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		t.Fatal("an unreadable result is not an API refusal")
+	}
+	if !strings.Contains(err.Error(), "sendMessage") {
+		t.Fatalf("err = %v, want the method named", err)
+	}
+}
+
+// The three methods that answer with a bare true were not checking ok at all.
+func TestOKFalseIsCaughtForMethodsWithNoResult(t *testing.T) {
+	for _, method := range []string{"answerCallbackQuery", "setMyCommands", "editMessageText"} {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: refused"}`))
+		})
+		var err error
+		switch method {
+		case "answerCallbackQuery":
+			err = c.AnswerCallbackQuery(context.Background(), "cb", "")
+		case "setMyCommands":
+			err = c.SetMyCommands(context.Background(), []BotCommand{{Command: "start"}})
+		case "editMessageText":
+			err = c.EditMessageText(context.Background(), 1, 2, "text", nil)
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("%s: err = %v, want an *APIError", method, err)
+		}
 	}
 }

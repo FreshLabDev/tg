@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ var probeSafe = map[string]bool{
 	"deleteMessage":            true,
 	"editEphemeralMessageText": true,
 	"editMessageCaption":       true,
+	"editMessageMedia":         true,
 	"editMessageReplyMarkup":   true,
 	"editMessageText":          true,
 	"forwardMessage":           true,
@@ -43,6 +45,7 @@ var probeSafe = map[string]bool{
 	"sendAudio":                true,
 	"sendChatAction":           true,
 	"sendDocument":             true,
+	"sendMediaGroup":           true,
 	"sendMessage":              true,
 	"sendMessageDraft":         true,
 	"sendPhoto":                true,
@@ -82,16 +85,21 @@ func (c *Client) Probe(ctx context.Context, methods ...string) ([]string, error)
 	}
 	var missing []string
 	for _, m := range methods {
-		var discard map[string]any
-		err := c.post(ctx, m, map[string]any{}, &discard)
+		err := c.probeOnce(ctx, m)
 		switch {
 		case err == nil:
 			// The method exists and, surprisingly, accepted an empty body.
 			continue
 		case IsMethodNotFound(err):
 			missing = append(missing, m)
+		case isInconclusive(err):
+			// The server never got as far as looking at the method, so its
+			// answer says nothing about whether the method exists. Reporting
+			// "present" here would defeat the point of asking.
+			return nil, fmt.Errorf("cannot tell whether %s exists: %w", m, err)
 		case errors.As(err, new(*APIError)):
-			// Any other API answer (400, 401, 403…) means the method is there.
+			// Any other API answer -- a 400 on the empty body, most often --
+			// means the method is there.
 			continue
 		default:
 			return nil, err
@@ -99,6 +107,48 @@ func (c *Client) Probe(ctx context.Context, methods ...string) ([]string, error)
 	}
 	sort.Strings(missing)
 	return missing, nil
+}
+
+// probeOnce asks for one method, retrying a connection that never answered.
+// An ordinary POST is not retried, because a lost answer may still have been
+// acted on -- but a probe carries an empty body, so the method cannot have
+// done anything, and replaying it is free. Without this, one dropped
+// connection at startup reads as "the server lacks this method".
+func (c *Client) probeOnce(ctx context.Context, method string) error {
+	const attempts = 3
+	ctx = withProbe(ctx)
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var discard map[string]any
+		err := c.post(ctx, method, map[string]any{}, &discard)
+		if err == nil || errors.As(err, new(*APIError)) {
+			return err
+		}
+		lastErr = err
+		if ctx.Err() != nil || attempt == attempts {
+			return err
+		}
+		if err := c.sleep(ctx, retryDelay(attempt)); err != nil {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+// isInconclusive reports an answer that is about the caller rather than the
+// method: rejected credentials, or a proxy refusing on the server's behalf.
+func isInconclusive(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.code() {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return true
+	}
+	// A 404 that is not Telegram's "method not found" came from something in
+	// front of the server, not from the server.
+	return apiErr.code() == http.StatusNotFound && !IsMethodNotFound(err)
 }
 
 // Require is Probe as a single error.
@@ -153,27 +203,39 @@ func (c *Client) Preflight(ctx context.Context, n Needs) (Me, error) {
 	return me, nil
 }
 
-// getMeWaiting retries getMe until wait has passed. Only connection-level
-// failures are worth waiting on: a rejected token will not become valid.
+// getMeWaiting retries getMe until wait has passed. A rejected token will not
+// become valid, so an answer like 401 ends it immediately; a server that is
+// still starting answers with a connection failure, a 429 or a 5xx, and those
+// are exactly what the wait is for.
 func (c *Client) getMeWaiting(ctx context.Context, wait time.Duration) (Me, error) {
-	deadline := time.Now().Add(wait)
+	if wait <= 0 {
+		return c.GetMe(ctx)
+	}
+	// Wait bounds the whole thing, not just the pauses between tries. GetMe
+	// retries internally and each attempt carries its own timeout, so without
+	// this a 30-second budget could run for minutes -- and an operator sizes a
+	// restart policy on the number they set.
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+
 	delay := 500 * time.Millisecond
+	var lastErr error
 	for attempt := 1; ; attempt++ {
-		me, err := c.GetMe(ctx)
+		me, err := c.GetMe(waitCtx)
 		if err == nil {
 			return me, nil
 		}
-		var apiErr *APIError
-		if errors.As(err, &apiErr) || time.Now().After(deadline) || ctx.Err() != nil {
-			return Me{}, err
+		lastErr = err
+		if !retryableError(err) || waitCtx.Err() != nil {
+			return Me{}, lastErr
 		}
 		c.log.Warn("telegram bot api not ready, retrying getMe",
 			"attempt", attempt, "retry_in", delay.String(), "error", err)
-		if err := c.sleep(ctx, delay); err != nil {
-			return Me{}, err
+		if waitErr := c.sleep(waitCtx, delay); waitErr != nil {
+			return Me{}, lastErr
 		}
 		if delay < 5*time.Second {
-			delay *= 2
+			delay = min(2*delay, 5*time.Second)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package tg is the Telegram Bot API client shared by the FreshLab bots.
+// Package tg is the Telegram Bot API client shared by the Asterfield bots.
 //
 // It exists because the same transport was living in three repositories at
 // once and had already drifted: one copy counted metrics, one redacted errors

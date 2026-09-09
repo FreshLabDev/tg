@@ -3,8 +3,10 @@ package tg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -73,21 +75,20 @@ func (c *Client) copyLocalFile(path, dst string, maxBytes int64) error {
 	if c.filesRoot == "" {
 		return fmt.Errorf("bot api server returned an absolute file path %q: it runs with --local and serves no files over HTTP, so its data directory must be mounted and WithLocalFiles set", c.redact(path))
 	}
-	base := filepath.Join(c.filesRoot, c.token)
-	clean := filepath.Clean(path)
-	if clean != base && !strings.HasPrefix(clean, base+string(filepath.Separator)) {
-		return fmt.Errorf("bot api file %q is outside this bot's directory %q: check that WithLocalFiles matches the server's --dir (or --files-dir)", c.redact(clean), c.redact(base))
+	clean, err := c.resolveUnderBotDir(path)
+	if err != nil {
+		return err
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
-		return fmt.Errorf("local bot api file unavailable: %w", c.redactError(err))
+		return fmt.Errorf("local bot api file unavailable: %w", c.redactPathError(err))
 	}
 	if info.Size() > maxBytes {
 		return fmt.Errorf("%w: %d bytes", ErrFileTooLarge, info.Size())
 	}
 	in, err := os.Open(clean)
 	if err != nil {
-		return fmt.Errorf("open local bot api file: %w", c.redactError(err))
+		return fmt.Errorf("open local bot api file: %w", c.redactPathError(err))
 	}
 	defer in.Close()
 	if err := writeLimited(dst, in, maxBytes); err != nil {
@@ -95,6 +96,42 @@ func (c *Client) copyLocalFile(path, dst string, maxBytes int64) error {
 	}
 	_ = os.Remove(clean)
 	return nil
+}
+
+// resolveUnderBotDir turns a path the server handed over into a real path
+// inside this bot's own directory, or refuses it.
+//
+// Cleaning the path stops a "..", but not a symlink: the directory is written
+// by another process on a volume shared with every other bot, so a link
+// planted there would otherwise be followed straight out of the boundary this
+// check exists to hold. Both sides are resolved before they are compared.
+func (c *Client) resolveUnderBotDir(path string) (string, error) {
+	base := filepath.Clean(filepath.Join(c.filesRoot, c.token))
+	// A directory that is not there yet cannot be resolved, and cannot contain
+	// anything either: the lexical form is enough to refuse the path below.
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		base = resolved
+	}
+	clean, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("bot api file unavailable: %w", c.redactPathError(err))
+	}
+	if clean != base && !strings.HasPrefix(clean, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("bot api file %q resolves outside this bot's directory %q: a shared server's data directory holds every other bot's files", c.redact(clean), c.redact(base))
+	}
+	return clean, nil
+}
+
+// redactPathError keeps the error's identity -- fs.ErrNotExist and friends
+// still match through errors.Is -- while scrubbing the token out of the path
+// it carries. A local server names each bot's directory after its token, so
+// the path is as sensitive as a URL.
+func (c *Client) redactPathError(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return &fs.PathError{Op: pathErr.Op, Path: c.redact(pathErr.Path), Err: pathErr.Err}
+	}
+	return c.redactError(err)
 }
 
 // VerifyLocalFiles checks at startup what a download would otherwise discover
@@ -108,14 +145,14 @@ func (c *Client) VerifyLocalFiles() error {
 	dir := filepath.Join(c.filesRoot, c.token)
 	info, err := os.Stat(dir)
 	if err != nil {
-		return fmt.Errorf("bot api files directory %q is not available: %w", c.redact(dir), c.redactError(err))
+		return fmt.Errorf("bot api files directory %q is not available: %w", c.redact(dir), c.redactPathError(err))
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("bot api files path %q is not a directory", c.redact(dir))
 	}
 	probe, err := os.CreateTemp(dir, ".tg-preflight-*")
 	if err != nil {
-		return fmt.Errorf("bot api files directory %q is not writable, so downloaded files could never be removed: %w", c.redact(dir), c.redactError(err))
+		return fmt.Errorf("bot api files directory %q is not writable, so downloaded files could never be removed: %w", c.redact(dir), c.redactPathError(err))
 	}
 	name := probe.Name()
 	_ = probe.Close()
@@ -134,13 +171,23 @@ func (c *Client) redact(s string) string {
 }
 
 // writeLimited copies at most maxBytes into dst and fails if the source has
-// more, so an oversize file is rejected without ever being held whole.
-func writeLimited(dst string, src io.Reader, maxBytes int64) error {
+// more, so an oversize file is rejected without ever being held whole. A
+// failure removes dst: os.Create truncates before the size is known, and a
+// caller that finds a file where an error was reported will process it.
+func writeLimited(dst string, src io.Reader, maxBytes int64) (err error) {
 	out, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create download target: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		closeErr := out.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(dst)
+		}
+	}()
 	written, err := io.Copy(out, io.LimitReader(src, maxBytes+1))
 	if err != nil {
 		return fmt.Errorf("write download: %w", err)

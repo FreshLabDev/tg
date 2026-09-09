@@ -24,6 +24,11 @@ services:
       - type: bind
         source: ${BOT_API_DIR}/${TELEGRAM_BOT_TOKEN}
         target: /var/lib/telegram-bot-api/${TELEGRAM_BOT_TOKEN}
+        # Not decoration: without a bind option Compose flattens the long
+        # syntax back into "source:target:rw" and the daemon splits it on the
+        # colons in the token.
+        bind:
+          propagation: rprivate
     user: "101:101"
 ```
 
@@ -32,8 +37,10 @@ Four details that are easy to get wrong:
 - **Mount only this bot's subdirectory.** The server's data directory holds one
   subdirectory per bot, named after that bot's full token. Mounting the parent
   hands every other bot's credentials to this one.
-- **Use the long volume syntax.** The path contains the token, the token
-  contains a colon, and Docker's `source:target` form splits on colons.
+- **Use the long volume syntax, with a `bind` option.** Both paths contain the
+  token, the token contains a colon, and `source:target` splits on colons —
+  and so does long syntax with no `bind` option, because Compose flattens that
+  back into a string.
 - **Create the directory first, owned by that uid.** Docker creates a missing
   bind source as `root`, and then neither the server nor the bot can write in
   it. `Preflight` with `Files: true` catches this at startup, but only after

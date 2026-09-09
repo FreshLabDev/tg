@@ -10,7 +10,7 @@ import (
 )
 
 // noLinkPreview replaces the removed disable_web_page_preview parameter.
-var noLinkPreview = map[string]any{"is_disabled": true}
+var noLinkPreview = &LinkPreviewOptions{IsDisabled: true}
 
 func (c *Client) GetMe(ctx context.Context) (Me, error) {
 	var resp struct {
@@ -92,6 +92,39 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, mar
 		"parse_mode":           "HTML",
 		"link_preview_options": noLinkPreview,
 	}, markup)
+}
+
+// SendPlainText sends text with no parse mode at all. It is the delivery of
+// last resort: HTML that Telegram rejects -- malformed, or using a tag a
+// newer client stopped accepting -- fails the whole send, and a notification
+// that arrives unformatted beats one that does not arrive.
+func (c *Client) SendPlainText(ctx context.Context, chatID int64, text string) (Message, error) {
+	return c.sendMessage(ctx, map[string]any{
+		"chat_id":              chatID,
+		"text":                 text,
+		"link_preview_options": noLinkPreview,
+	}, nil)
+}
+
+// SendTextWithPreview sends HTML text and lets Telegram render its own preview
+// of a link inside it. Every other send here suppresses the preview, because a
+// bot's own message is normally the content; this exists for a bot relaying
+// text whose author decided otherwise. A nil preview disables it, matching the
+// rest of the package.
+func (c *Client) SendTextWithPreview(ctx context.Context, chatID int64, threadID int, text string, preview *LinkPreviewOptions, markup *InlineKeyboardMarkup) (Message, error) {
+	if preview == nil {
+		preview = noLinkPreview
+	}
+	req := map[string]any{
+		"chat_id":              chatID,
+		"text":                 text,
+		"parse_mode":           "HTML",
+		"link_preview_options": preview,
+	}
+	if threadID > 0 {
+		req["message_thread_id"] = threadID
+	}
+	return c.sendMessage(ctx, req, markup)
 }
 
 // SendReply sends an HTML message as a reply, optionally inside a forum topic.
@@ -179,6 +212,21 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackID, text strin
 // AnswerCallbackQueryAlert answers with a modal the user has to dismiss.
 func (c *Client) AnswerCallbackQueryAlert(ctx context.Context, callbackID, text string) error {
 	return c.answerCallbackQuery(ctx, callbackID, text, true)
+}
+
+// AnswerCallbackQueryURL answers a tapped button by opening a link, which for
+// a t.me deep link means the client follows it without an intermediate
+// message. Telegram only honors a URL that points at the bot itself or at a
+// game it owns; anything else is ignored, and the tap looks like it did
+// nothing.
+func (c *Client) AnswerCallbackQueryURL(ctx context.Context, callbackID, url string) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	return c.post(ctx, "answerCallbackQuery", map[string]any{
+		"callback_query_id": callbackID,
+		"url":               url,
+	}, &resp)
 }
 
 func (c *Client) answerCallbackQuery(ctx context.Context, callbackID, text string, alert bool) error {
