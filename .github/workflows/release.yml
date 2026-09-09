@@ -20,14 +20,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require the tag commit on main
-        # docs/versioning.md: every pre-release and stable release is published
-        # from main. The module proxy caches a tag permanently on first fetch,
-        # so a tag on an unmerged branch cannot be taken back.
+      - name: Require the tag on the branch its channel is published from
+        # docs/versioning.md: pre-releases are tagged on dev, stable releases on
+        # main. A stable tag that never went through main would publish
+        # something the production branch has not seen.
         run: |
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "tag ${GITHUB_REF_NAME} is not an ancestor of origin/main"
+          if printf '%s' "${GITHUB_REF_NAME}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+            branch=dev
+          else
+            branch=main
+          fi
+          git fetch --no-tags origin "${branch}:refs/remotes/origin/${branch}"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${branch}"; then
+            echo "tag ${GITHUB_REF_NAME} is not an ancestor of origin/${branch}"
             exit 1
           fi
 

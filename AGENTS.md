@@ -34,6 +34,9 @@ Keep tg small, dependency-free, and true to the Telegram protocol only.
 
 ## Versioning
 
+- Work on `dev`. Pre-releases (`-alpha.N`, `-beta.N`, `-rc.N`) are tagged on
+  `dev`; stable versions are tagged on `main`, on the merge commit from `dev`.
+  The test bot runs `dev`, the production bot runs `main`.
 - SemVer per `docs/versioning.md`. The line starts at `v0.0.1-alpha.1`;
   `alpha` holds until a bot runs on it with live credentials.
 - `BotAPI` in `tg.go` declares the Bot API version this module targets. Bump it

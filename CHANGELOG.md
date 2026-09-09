@@ -2,10 +2,34 @@
 
 All notable tg changes are documented here.
 
-tg uses SemVer-style versions. This first line starts at `v0.0.1`. Alpha,
-beta, and rc tags are reserved for changes that still need live validation.
+The `## <tag>` section of this file *is* the GitHub Release body: the release
+workflow copies it verbatim and refuses a tag that has no section. Write it
+for whoever has to decide whether to upgrade.
+
+See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
+[`docs/releases.md`](docs/releases.md) for how a release is published.
 
 ## Unreleased
+
+### Changed
+
+- One versioning and release document for the whole family. `docs/versioning.md`
+  and `docs/releases.md` are now byte-identical across every Asterfield
+  repository apart from two clearly marked sections: this repository's own
+  version line, and the surface where a change here breaks something. They spell
+  out what each of the three numbers means, what the `-alpha.N` suffix counts,
+  when alpha becomes beta and when it is legitimate to skip to rc or run a
+  pre-release in production.
+- **Pre-releases are now tagged on `dev`, not `main`.** Only stable versions are
+  tagged on `main`, on the merge commit from `dev`, so `main` answers exactly one
+  question: what is in production. The test bot runs `dev`, the production bot
+  runs `main`. `release.yml` enforces this and refuses a tag on the wrong branch.
+  Earlier pre-releases in this repository were tagged on `main` under the
+  previous rule; they are left as they are.
+- The document is explicit that tg's major number is not a judgement call: Go
+  gives it a hard meaning, since a `v2` module has a different import path. A
+  change that removes or re-signs an exported function is major whatever it
+  feels like.
 
 ### Added
 
