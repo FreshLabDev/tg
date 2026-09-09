@@ -11,6 +11,13 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
+## v0.1.0-alpha.1 - 2026-09-09
+
+The surface searchy needs to leave its third-party client. Nothing that
+existed moved, so every bot already on tg is unaffected; the version says
+`0.1.0` rather than `0.0.2` because the additions are notable, and carries
+`alpha` because no bot has yet run on them against live Telegram.
+
 ### Added
 
 - **Media sends.** `SendPhoto`, `SendVideo`, `SendAudio`, `SendDocument` and
