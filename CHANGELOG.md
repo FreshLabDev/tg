@@ -11,12 +11,12 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
-## v0.1.0-alpha.1 - 2026-09-09
+Use this section for changes that are merged but not released yet.
 
-The surface searchy needs to leave its third-party client. Nothing that
-existed moved, so every bot already on tg is unaffected; the version says
-`0.1.0` rather than `0.0.2` because the additions are notable, and carries
-`alpha` because no bot has yet run on them against live Telegram.
+## v0.1.0-alpha.2 - 2026-09-09
+
+Documentation only. The link-preview fix landed before alpha.1 was tagged and
+shipped with it; this is the deployment note that went in afterwards.
 
 ### Added
 
@@ -27,6 +27,15 @@ existed moved, so every bot already on tg is unaffected; the version says
   because the procedure changed on the same day. The section names this stack's
   host directory, its env file, the variable that selects the image, the networks
   it needs, and what a rollback actually is.
+
+## v0.1.0-alpha.1 - 2026-09-09
+
+The surface searchy needs to leave its third-party client. Nothing that
+existed moved, so every bot already on tg is unaffected; the version says
+`0.1.0` rather than `0.0.2` because the additions are notable, and carries
+`alpha` because no bot has yet run on them against live Telegram.
+
+### Added
 
 - **Media sends.** `SendPhoto`, `SendVideo`, `SendAudio`, `SendDocument` and
   `SendMediaGroup`, plus `EditMessageMedia` and `EditMessageReplyMarkup`. A file
@@ -92,11 +101,12 @@ existed moved, so every bot already on tg is unaffected; the version says
 
 - `release.yml`. Every tag from `v0.0.1-alpha.1` onward existed and was
   fetchable through the module proxy, but none of them had a GitHub Release, so
-  the only way to learn what a bump changed was to open the changelog in another
-  tab. The workflow verifies the tag is on `main`, re-runs gofmt, vet, the race
-  suite and govulncheck, and publishes the release from the matching changelog
-  section. The module proxy caches a tag permanently on first fetch, which is
-  why the branch check runs before anything else.
+  the only way to learn what a bump changed was to open the changelog in
+  another tab. The workflow verifies the tag is on the branch its channel
+  publishes from, re-runs gofmt, vet, the race suite and govulncheck, and
+  publishes the release from the matching changelog section. The module proxy
+  caches a tag permanently on first fetch, which is why the branch check runs
+  before anything else.
 
 ## v0.0.1-alpha.7 - 2026-09-08
 
