@@ -7,6 +7,16 @@ beta, and rc tags are reserved for changes that still need live validation.
 
 ## Unreleased
 
+### Added
+
+- `release.yml`. Every tag from `v0.0.1-alpha.1` onward existed and was
+  fetchable through the module proxy, but none of them had a GitHub Release, so
+  the only way to learn what a bump changed was to open the changelog in another
+  tab. The workflow verifies the tag is on `main`, re-runs gofmt, vet, the race
+  suite and govulncheck, and publishes the release from the matching changelog
+  section. The module proxy caches a tag permanently on first fetch, which is
+  why the branch check runs before anything else.
+
 ## v0.0.1-alpha.7 - 2026-09-08
 
 ### Fixed
