@@ -13,6 +13,16 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Changed
+
+- **A release waits for CI.** `release.yml` runs `ci.yml` on the tagged commit
+  and publishes nothing unless it passed. When CI cannot run, `release.yml` can
+  be started by hand with the tag and a reason; that run skips CI and prints the
+  reason at the top of the release notes. See `docs/releases.md`.
+- The Bot API drift check fails only the weekly run; a new Bot API version is
+  not a defect in the code being pushed or released.
+- Dependabot opens grouped version updates against `dev`.
+
 ## v0.1.0 - 2026-09-09
 
 The first stable release of the 0.1.0 line, summarising it rather than only the
