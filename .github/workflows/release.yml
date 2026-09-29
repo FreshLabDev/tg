@@ -7,17 +7,50 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # The way round CI, for when it could not run on the tagged commit (an Actions
+  # outage, a spending limit) and the release cannot wait. It cannot happen by
+  # accident: it is started by hand, names a tag that already exists, and the
+  # reason is printed at the top of the release notes.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish without running CI
+        required: true
+        type: string
+      reason:
+        description: Why CI is skipped (printed at the top of the release notes)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  ci:
+    name: CI
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
     name: Verify the tag and publish the release
+    needs: ci
+    # A pushed tag publishes only after CI passed on it; the manual run above is
+    # the only way to publish without that, and it says so in the notes.
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      SKIP_REASON: ${{ inputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
 
       - name: Require the tag on the branch its channel is published from
@@ -25,66 +58,51 @@ jobs:
         # main. A stable tag that never went through main would publish
         # something the production branch has not seen.
         run: |
-          if printf '%s' "${GITHUB_REF_NAME}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+          commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          if printf '%s' "${TAG}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
             branch=dev
           else
             branch=main
           fi
           git fetch --no-tags origin "${branch}:refs/remotes/origin/${branch}"
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${branch}"; then
-            echo "tag ${GITHUB_REF_NAME} is not an ancestor of origin/${branch}"
+          if ! git merge-base --is-ancestor "${commit}" "origin/${branch}"; then
+            echo "tag ${TAG} is not an ancestor of origin/${branch}"
             exit 1
           fi
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26"
-          check-latest: true
-
-      - name: Verify, vet and test
-        run: |
-          go mod verify
-          test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
-          go vet ./...
-          go test -race ./...
-
-      - name: Vulnerability scan
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
 
       - name: Extract changelog section
         id: changelog
         run: |
-          version="${GITHUB_REF_NAME}"
           notes_file="$(mktemp)"
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+            printf '> **Published without CI.** %s\n\n' "${SKIP_REASON}" >"${notes_file}"
+          fi
           # Match by literal prefix AND a boundary, so "## v0.0.1" does not
           # capture "## v0.0.1-alpha.1".
-          awk -v ver="## ${version}" '
+          section="$(mktemp)"
+          awk -v ver="## ${TAG}" '
             index($0, ver) == 1 && (length($0) == length(ver) || substr($0, length(ver) + 1, 1) == " ") { capture=1; next }
             capture && /^## / { exit }
             capture { print }
-          ' CHANGELOG.md >"${notes_file}"
-          if [ ! -s "${notes_file}" ]; then
-            echo "CHANGELOG.md has no '## ${version}' section"
+          ' CHANGELOG.md >"${section}"
+          if [ ! -s "${section}" ]; then
+            echo "CHANGELOG.md has no '## ${TAG}' section"
             exit 1
           fi
+          cat "${section}" >>"${notes_file}"
           echo "file=${notes_file}" >>"$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_FILE: ${{ steps.changelog.outputs.file }}
         run: |
           flags=""
-          if printf '%s' "${GITHUB_REF_NAME}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+          if printf '%s' "${TAG}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
             flags="--prerelease"
           fi
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${{ steps.changelog.outputs.file }}" ${flags}
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --title "${TAG}" --notes-file "${NOTES_FILE}" ${flags}
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${{ steps.changelog.outputs.file }}" ${flags}
+            gh release create "${TAG}" --verify-tag --title "${TAG}" --notes-file "${NOTES_FILE}" ${flags}
           fi

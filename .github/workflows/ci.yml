@@ -5,6 +5,8 @@ on:
   push:
     branches: [main, dev]
   pull_request:
+  # release.yml runs this before it publishes anything.
+  workflow_call:
   schedule:
     # Weekly, so a new Bot API release is noticed by a job rather than by a
     # user whose message went unanswered.
@@ -37,6 +39,9 @@ jobs:
 
   bot-api-drift:
     runs-on: ubuntu-latest
+    # A new Bot API from Telegram fails the weekly run, which is what it is for,
+    # but it is not a defect in the code being pushed or released.
+    continue-on-error: ${{ github.event_name != 'schedule' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: compare the declared Bot API version with Telegram's
