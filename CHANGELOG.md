@@ -13,6 +13,50 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Added
+
+- **Edits and reactions are decoded.** `Update` gained `EditedMessage`,
+  `MessageReaction` and `MessageReactionCount`, with the types behind them:
+  `MessageReactionUpdated`, `MessageReactionCountUpdated`, `ReactionCount` and
+  `ReactionType`. A reaction is an emoji, a custom emoji or a paid one, told apart
+  by `Type` (`ReactionEmoji`, `ReactionCustomEmoji`, `ReactionPaid`). Until now
+  naming these kinds in `WithAllowedUpdates` was accepted, and the updates came
+  back as an `Update` holding only `UpdateID`, with no error. Telegram delivers
+  the two reaction kinds only when the bot is an administrator of the chat.
+- **More of `Message` is modeled.** `Animation`, `Sticker`, `MigrateToChatID`,
+  `MigrateFromChatID` and `IsTopicMessage`, plus `ChatMember.IsMember`, which
+  Telegram sends only for a restricted member. For a GIF Telegram fills
+  `Document` as well as `Animation`, so a bot that sorts attachments checks
+  `Animation` first. A reply chain in an ordinary supergroup carries a
+  `MessageThreadID` just as a forum topic does; `IsTopicMessage` is what tells
+  them apart before a bot sends into the thread.
+- `EditMessageRichMarkdown`, the Markdown counterpart of `EditMessageRichHTML`,
+  taking the same options, so `WithEntityDetection` works with it. Without it a
+  bot that sent a rich message as Markdown had to go through `Call` to edit it.
+  The Bot API version stays at 10.3: rich messages are older than that.
+
+### Fixed
+
+- **`Probe` no longer reads a 409, a 429 or a 5xx as "the method exists".** It
+  took any API answer other than "method not found" for presence, so a gateway
+  error or a rate limit during startup let `Preflight` pass against a server that
+  might not have the method. Those answers now return an error, `cannot tell
+  whether <method> exists`, which wraps the `*APIError`, as a 401, a 403 and a
+  proxy's 404 already did. A bot that calls `Preflight` with `Methods` can now
+  fail to start on a server that is briefly unwell, where before it started. A
+  bot that would rather run degraded calls `Probe` itself and keeps its fallback
+  when it returns an error.
+
+### Documentation
+
+- `CallbackQuery.Message` says what Telegram sends for a message the bot can no
+  longer reach: `date` is 0 and only `Chat` and `MessageID` mean anything, so
+  `Message.Date == 0` is the test.
+- `WithAllowedUpdates` named `my_chat_member` as a kind Telegram's default
+  leaves out. It does not: the default leaves out `chat_member`,
+  `message_reaction` and `message_reaction_count`. An empty option also does not
+  restore that default; Telegram keeps the list last set for the token.
+
 ### Changed
 
 - **A release waits for CI.** `release.yml` runs `ci.yml` on the tagged commit

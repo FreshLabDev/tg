@@ -88,10 +88,24 @@ func (c *Client) SendRichMarkdown(ctx context.Context, chatID int64, markdown st
 // what turns a "working…" placeholder into the finished answer, so the user
 // watches one message instead of waiting on an empty screen.
 func (c *Client) EditMessageRichHTML(ctx context.Context, chatID, messageID int64, body string, markup *InlineKeyboardMarkup, opts ...RichOption) error {
+	return c.editMessageRich(ctx, chatID, messageID, richHTML(body, opts...), markup)
+}
+
+// EditMessageRichMarkdown is [Client.EditMessageRichHTML] for GFM, with the same
+// caveat as [Client.SendRichMarkdown]: only for content authored as markdown. It
+// takes the same options, so [WithEntityDetection] lets Telegram find the links
+// and mentions in a document a person wrote.
+func (c *Client) EditMessageRichMarkdown(ctx context.Context, chatID, messageID int64, markdown string, markup *InlineKeyboardMarkup, opts ...RichOption) error {
+	return c.editMessageRich(ctx, chatID, messageID, richMarkdown(markdown, opts...), markup)
+}
+
+// editMessageRich sends editMessageText with a rich_message. Like
+// [Client.EditMessageText], it treats "message is not modified" as success.
+func (c *Client) editMessageRich(ctx context.Context, chatID, messageID int64, rich map[string]any, markup *InlineKeyboardMarkup) error {
 	req := map[string]any{
 		"chat_id":      chatID,
 		"message_id":   messageID,
-		"rich_message": richHTML(body, opts...),
+		"rich_message": rich,
 	}
 	if markup != nil {
 		req["reply_markup"] = markup

@@ -4,8 +4,10 @@ package tg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -79,6 +81,127 @@ func TestEditMessageRichHTMLTreatsNotModifiedAsSuccess(t *testing.T) {
 
 	if err := c.EditMessageRichHTML(context.Background(), 1, 2, "same", nil); err != nil {
 		t.Fatalf("an unchanged edit must not be an error: %v", err)
+	}
+}
+
+func TestEditMessageRichHTMLSendsHTMLAndNeverMarkdown(t *testing.T) {
+	handler, method, body := capture(t, `{"ok":true,"result":true}`)
+	c, _ := newTestClient(t, handler)
+
+	if err := c.EditMessageRichHTML(context.Background(), 42, 7, "<b>done</b>", nil); err != nil {
+		t.Fatalf("EditMessageRichHTML: %v", err)
+	}
+	if *method != "editMessageText" {
+		t.Fatalf("method = %q", *method)
+	}
+	want := map[string]any{"html": "<b>done</b>", "skip_entity_detection": true}
+	if !reflect.DeepEqual((*body)["rich_message"], want) {
+		t.Fatalf("rich_message = %v, want %v", (*body)["rich_message"], want)
+	}
+}
+
+func TestEditMessageRichMarkdownSendsTheRichPayload(t *testing.T) {
+	const terms = "# Terms\n\nWrite to @operator or see https://example.test/terms"
+	panel := &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{
+		{Text: "Accept", CallbackData: "agree:1", Style: StyleSuccess},
+	}}}
+	tests := []struct {
+		name         string
+		opts         []RichOption
+		markup       *InlineKeyboardMarkup
+		wantRich     map[string]any
+		wantKeyboard bool
+	}{
+		{
+			name:         "entity detection is off unless asked",
+			markup:       panel,
+			wantRich:     map[string]any{"markdown": terms, "skip_entity_detection": true},
+			wantKeyboard: true,
+		},
+		{
+			name:         "entity detection on",
+			opts:         []RichOption{WithEntityDetection()},
+			markup:       panel,
+			wantRich:     map[string]any{"markdown": terms},
+			wantKeyboard: true,
+		},
+		{
+			name:     "no markup leaves the keyboard alone",
+			opts:     []RichOption{WithEntityDetection()},
+			wantRich: map[string]any{"markdown": terms},
+		},
+		{
+			name:     "a nil option is ignored",
+			opts:     []RichOption{nil},
+			wantRich: map[string]any{"markdown": terms, "skip_entity_detection": true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, method, body := capture(t, `{"ok":true,"result":true}`)
+			c, _ := newTestClient(t, handler)
+
+			if err := c.EditMessageRichMarkdown(context.Background(), -1001234567890, 77, terms, tt.markup, tt.opts...); err != nil {
+				t.Fatalf("EditMessageRichMarkdown: %v", err)
+			}
+			if *method != "editMessageText" {
+				t.Fatalf("method = %q, want editMessageText: a rich edit is an ordinary edit with rich_message", *method)
+			}
+			if (*body)["chat_id"] != float64(-1001234567890) || (*body)["message_id"] != float64(77) {
+				t.Fatalf("chat_id = %v, message_id = %v", (*body)["chat_id"], (*body)["message_id"])
+			}
+			if !reflect.DeepEqual((*body)["rich_message"], tt.wantRich) {
+				t.Fatalf("rich_message = %v, want %v", (*body)["rich_message"], tt.wantRich)
+			}
+			for _, field := range []string{"text", "parse_mode"} {
+				if _, has := (*body)[field]; has {
+					t.Fatalf("%s must not accompany rich_message: Telegram wants one or the other", field)
+				}
+			}
+			markup, hasMarkup := (*body)["reply_markup"].(map[string]any)
+			if hasMarkup != tt.wantKeyboard {
+				t.Fatalf("reply_markup = %v, want present = %v", (*body)["reply_markup"], tt.wantKeyboard)
+			}
+			if tt.wantKeyboard {
+				rows, _ := markup["inline_keyboard"].([]any)
+				if len(rows) != 1 {
+					t.Fatalf("inline_keyboard = %v", markup["inline_keyboard"])
+				}
+				button, _ := rows[0].([]any)[0].(map[string]any)
+				if button["callback_data"] != "agree:1" || button["style"] != StyleSuccess {
+					t.Fatalf("button = %v", button)
+				}
+			}
+		})
+	}
+}
+
+// Tapping the same button twice re-renders identical content, and Telegram
+// answers that with a 400. It is the common case, not a failure.
+func TestEditMessageRichMarkdownTreatsNotModifiedAsSuccess(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"}`))
+	})
+
+	if err := c.EditMessageRichMarkdown(context.Background(), 1, 2, "same", nil, WithEntityDetection()); err != nil {
+		t.Fatalf("an unchanged edit must not be an error: %v", err)
+	}
+}
+
+func TestEditMessageRichMarkdownReturnsEveryOtherFailure(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message to edit not found"}`))
+	})
+
+	err := c.EditMessageRichMarkdown(context.Background(), 1, 2, "text", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		t.Fatalf("error = %v, want the 400 APIError", err)
+	}
+	if IsMessageNotModified(err) {
+		t.Fatal("a missing message is not 'not modified'")
 	}
 }
 

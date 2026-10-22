@@ -4,6 +4,7 @@ package tg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -222,6 +223,92 @@ func TestProbeRefusesToGuessWhenCredentialsAreRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot tell") {
 		t.Fatalf("message = %q", err.Error())
+	}
+}
+
+// A 409, a 429 or a 5xx is the server talking about itself: it was busy,
+// conflicted with another poller or failing, and never looked at the request.
+// Read as "the method is there" it lets a bot start against a server that lacks
+// the method, and it makes a bot that falls back from rich messages latch onto
+// them after one bad second at startup.
+func TestProbeRefusesToGuessOnConflictRateLimitAndServerErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"conflict", http.StatusConflict, `{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}`},
+		{"rate limited", http.StatusTooManyRequests, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}`},
+		{"rate limited without a retry_after", http.StatusTooManyRequests, `{"ok":false,"error_code":429,"description":"Too Many Requests"}`},
+		{"internal error", http.StatusInternalServerError, `{"ok":false,"error_code":500,"description":"Internal Server Error"}`},
+		{"bad gateway from a proxy", http.StatusBadGateway, `<html><body><h1>502 Bad Gateway</h1></body></html>`},
+		{"service unavailable", http.StatusServiceUnavailable, `{"ok":false,"error_code":503,"description":"Service Unavailable"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+
+			missing, err := c.Probe(context.Background(), "sendRichMessage")
+			if err == nil {
+				t.Fatalf("missing = %v, err = nil: a %d must not read as 'the method is there'", missing, tt.status)
+			}
+			if missing != nil {
+				t.Fatalf("missing = %v, want no verdict alongside the error", missing)
+			}
+			if !strings.Contains(err.Error(), "cannot tell whether sendRichMessage exists") {
+				t.Fatalf("message = %q", err.Error())
+			}
+			// The cause stays reachable, so a caller can still branch on it.
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tt.status {
+				t.Fatalf("error = %v, want the %d APIError wrapped", err, tt.status)
+			}
+		})
+	}
+}
+
+// The answers that are about the method still are: a parameter error means the
+// method exists, and "method not found" means it does not.
+func TestProbeStillReadsParameterErrorsAndMissingMethods(t *testing.T) {
+	c, _ := newTestClient(t, oldServer(map[string]bool{"sendMessage": true}))
+
+	missing, err := c.Probe(context.Background(), "sendMessage", "sendRichMessage")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "sendRichMessage" {
+		t.Fatalf("missing = %v, want [sendRichMessage]", missing)
+	}
+}
+
+// Preflight is how a bot refuses to start on a server that cannot serve it. A
+// probe the server could not answer must stop it with a message that says so,
+// not let it through and not blame a method the server never ruled on.
+func TestPreflightFailsClearlyWhenAProbeIsInconclusive(t *testing.T) {
+	for _, status := range []int{http.StatusConflict, http.StatusTooManyRequests, http.StatusBadGateway} {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/getMe") {
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"bot"}}`))
+				return
+			}
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":%d,"description":"server says no"}`, status)
+		})
+
+		_, err := c.Preflight(context.Background(), Needs{Methods: []string{"sendRichMessage"}})
+		if err == nil {
+			t.Fatalf("status %d: Preflight passed although the server never answered about sendRichMessage", status)
+		}
+		var missing *MissingMethodsError
+		if errors.As(err, &missing) {
+			t.Fatalf("status %d: error = %v, the server did not say the method is missing", status, err)
+		}
+		if !strings.Contains(err.Error(), "cannot tell whether sendRichMessage exists") {
+			t.Fatalf("status %d: message = %q", status, err.Error())
+		}
 	}
 }
 

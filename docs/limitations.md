@@ -30,7 +30,8 @@ reading the source.
   URL buttons, so no callback can arrive without a message today; a bot that
   puts `callback_data` on an inline result has to make this a pointer first,
   which every caller sees. Until then, `cq.Message.MessageID == 0` is the
-  check.
+  check. A message the bot can no longer reach is a different case: it is
+  present, with `Date == 0` and only `Chat` and `MessageID` filled.
 - **Downloads are invisible to the `Observer`.** On a self-hosted server a
   download is the largest and slowest thing a bot does, and it emits no event.
 
