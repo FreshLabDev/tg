@@ -46,6 +46,11 @@ Use this section for changes that are merged but not released yet.
   fail to start on a server that is briefly unwell, where before it started. A
   bot that would rather run degraded calls `Probe` itself and keeps its fallback
   when it returns an error.
+- **`DownloadToFile` redacts the token from an HTTP error.** The error body of a
+  failed download came back as it was. A reverse proxy in front of a
+  self-hosted server can echo the request URI in it, and the URI holds the
+  token. `Call` already scrubbed its errors; the download path now does the
+  same.
 
 ### Documentation
 

@@ -230,3 +230,24 @@ func TestLocalFileErrorsKeepTheirKindWithoutTheToken(t *testing.T) {
 		t.Fatal("the error must still say what kind of failure it was")
 	}
 }
+
+// A proxy in front of a self-hosted server may echo the request URI, token
+// included, in the body of its error page.
+func TestDownloadErrorBodyIsRedacted(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("no route for " + r.URL.Path))
+	})
+
+	err := c.DownloadToFile(context.Background(), "voice/file_1.oga", filepath.Join(t.TempDir(), "out"), 1<<20)
+	if err == nil {
+		t.Fatal("want an error for a 404")
+	}
+	if strings.Contains(err.Error(), testToken) {
+		t.Fatalf("the token is in the error: %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("err = %v, want an *APIError with status 404", err)
+	}
+}
