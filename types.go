@@ -72,6 +72,32 @@ type Document struct {
 	FileName     string `json:"file_name,omitempty"`
 }
 
+type Animation struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	Duration     int    `json:"duration"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
+}
+
+type Sticker struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	// Type is "regular", "mask" or "custom_emoji". It is the sticker's role and
+	// says nothing about its format, which IsAnimated and IsVideo describe.
+	Type       string `json:"type"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	IsAnimated bool   `json:"is_animated"`
+	IsVideo    bool   `json:"is_video"`
+	Emoji      string `json:"emoji,omitempty"`
+	SetName    string `json:"set_name,omitempty"`
+	FileSize   int64  `json:"file_size,omitempty"`
+}
+
 type Photo struct {
 	FileID       string `json:"file_id"`
 	FileUniqueID string `json:"file_unique_id"`
@@ -97,6 +123,11 @@ type Message struct {
 	// EphemeralMessageID is non-zero only for a Bot API 10.3 ephemeral message.
 	EphemeralMessageID int64 `json:"ephemeral_message_id,omitempty"`
 	MessageThreadID    int   `json:"message_thread_id,omitempty"`
+	// IsTopicMessage is true for a message that belongs to a topic. It is not
+	// implied by MessageThreadID: Telegram also sets that on a reply chain in an
+	// ordinary supergroup, where there is no topic to address, so a bot that
+	// sends into a thread should check this first.
+	IsTopicMessage bool `json:"is_topic_message,omitempty"`
 	// From is absent on channel posts, so it is a pointer.
 	From            *User           `json:"from,omitempty"`
 	ReceiverUser    *User           `json:"receiver_user,omitempty"`
@@ -113,6 +144,18 @@ type Message struct {
 	Document        *Document       `json:"document,omitempty"`
 	Photo           []Photo         `json:"photo,omitempty"`
 	ReplyToMessage  *Message        `json:"reply_to_message,omitempty"`
+
+	// Animation arrives together with Document, which Telegram fills for a GIF
+	// as well for backward compatibility. A bot that sorts attachments must look
+	// at Animation before Document or it will take every GIF for a file.
+	Animation *Animation `json:"animation,omitempty"`
+	Sticker   *Sticker   `json:"sticker,omitempty"`
+
+	// MigrateToChatID and MigrateFromChatID are service messages for a group
+	// that became a supergroup under a new chat id: the first arrives in the old
+	// group, the second in the new supergroup.
+	MigrateToChatID   int64 `json:"migrate_to_chat_id,omitempty"`
+	MigrateFromChatID int64 `json:"migrate_from_chat_id,omitempty"`
 
 	// Raw is the message exactly as Telegram sent it. This package models the
 	// fields the family uses and no more, so Raw is how a bot reaches a field
@@ -154,6 +197,10 @@ type CallbackQuery struct {
 	// address chat 0, so a bot that adds inline mode must make this a pointer
 	// first -- a change every caller has to see, which is why it is written
 	// down rather than made now.
+	//
+	// A message the bot can no longer access (deleted, or too old) arrives with
+	// date 0 and nothing but Chat and MessageID, so a bot that edits the message
+	// tests Message.Date == 0 before trusting any other field.
 	Message Message `json:"message"`
 	// ChatInstance identifies the message a callback came from even when
 	// Message is absent.
@@ -164,6 +211,10 @@ type CallbackQuery struct {
 type ChatMember struct {
 	Status string `json:"status"`
 	User   User   `json:"user"`
+	// IsMember is sent only with status "restricted", where false means the user
+	// is restricted but has left the chat. For every other status it is absent
+	// and reads false, which means nothing.
+	IsMember bool `json:"is_member,omitempty"`
 }
 
 type ChatMemberUpdated struct {
@@ -177,6 +228,53 @@ type ChatMemberUpdated struct {
 	NewChatMember ChatMember `json:"new_chat_member"`
 }
 
+// ReactionType is Telegram's union of an emoji, a custom emoji and a paid
+// reaction, flattened: Type says which of the other fields is set, and a paid
+// reaction sets neither.
+type ReactionType struct {
+	Type          string `json:"type"`
+	Emoji         string `json:"emoji,omitempty"`
+	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
+}
+
+// Reaction kinds, as Telegram reports them in [ReactionType.Type].
+const (
+	ReactionEmoji       = "emoji"
+	ReactionCustomEmoji = "custom_emoji"
+	ReactionPaid        = "paid"
+)
+
+// ReactionCount is one reaction and how many times it is on a message.
+type ReactionCount struct {
+	Type       ReactionType `json:"type"`
+	TotalCount int          `json:"total_count"`
+}
+
+// MessageReactionUpdated is one user changing their reactions on a message.
+// OldReaction and NewReaction are the whole lists before and after, not the
+// difference, so an added reaction is one that is in NewReaction and not in
+// OldReaction. User is absent when the user is anonymous, and ActorChat is set
+// instead. Telegram sends nothing for a reaction set by a bot.
+type MessageReactionUpdated struct {
+	Chat        Chat           `json:"chat"`
+	MessageID   int64          `json:"message_id"`
+	User        *User          `json:"user,omitempty"`
+	ActorChat   *Chat          `json:"actor_chat,omitempty"`
+	Date        int64          `json:"date"`
+	OldReaction []ReactionType `json:"old_reaction"`
+	NewReaction []ReactionType `json:"new_reaction"`
+}
+
+// MessageReactionCountUpdated carries the totals on a message whose reactions
+// are anonymous. Telegram groups these updates and may deliver them minutes
+// late.
+type MessageReactionCountUpdated struct {
+	Chat      Chat            `json:"chat"`
+	MessageID int64           `json:"message_id"`
+	Date      int64           `json:"date"`
+	Reactions []ReactionCount `json:"reactions"`
+}
+
 type Update struct {
 	UpdateID           int64               `json:"update_id"`
 	Message            *Message            `json:"message,omitempty"`
@@ -184,6 +282,15 @@ type Update struct {
 	MyChatMember       *ChatMemberUpdated  `json:"my_chat_member,omitempty"`
 	InlineQuery        *InlineQuery        `json:"inline_query,omitempty"`
 	ChosenInlineResult *ChosenInlineResult `json:"chosen_inline_result,omitempty"`
+
+	// EditedMessage is the new version of a message that was edited. An edit does
+	// not arrive as Message.
+	EditedMessage *Message `json:"edited_message,omitempty"`
+
+	// MessageReaction and MessageReactionCount reach only a bot that is an
+	// administrator of the chat and has named them in [WithAllowedUpdates].
+	MessageReaction      *MessageReactionUpdated      `json:"message_reaction,omitempty"`
+	MessageReactionCount *MessageReactionCountUpdated `json:"message_reaction_count,omitempty"`
 }
 
 // LinkPreviewOptions controls Telegram's own preview of a link in a message.

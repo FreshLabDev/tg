@@ -74,6 +74,12 @@ func (e *MissingMethodsError) Error() string {
 // method is asked for with an empty body: an existing method rejects that on
 // its parameters, a missing one answers "method not found".
 //
+// Only those two answers are a verdict. Anything that shows the server did not
+// get as far as the method -- rejected credentials, a proxy's 404, a 409, a 429
+// or a 5xx -- comes back as an error, because a guess either way is wrong: "all
+// present" lets a bot start against a server that lacks the method, and "missing"
+// makes it refuse to start on a server that was merely busy.
+//
 // Every method must be in the safe list, otherwise Probe refuses without
 // making any call: probing is not a dry run, and a method that works without
 // parameters would actually execute.
@@ -98,8 +104,8 @@ func (c *Client) Probe(ctx context.Context, methods ...string) ([]string, error)
 			// "present" here would defeat the point of asking.
 			return nil, fmt.Errorf("cannot tell whether %s exists: %w", m, err)
 		case errors.As(err, new(*APIError)):
-			// Any other API answer -- a 400 on the empty body, most often --
-			// means the method is there.
+			// What is left is the server rejecting the empty body -- a 400,
+			// most often -- and that means the method is there.
 			continue
 		default:
 			return nil, err
@@ -135,20 +141,26 @@ func (c *Client) probeOnce(ctx context.Context, method string) error {
 	return lastErr
 }
 
-// isInconclusive reports an answer that is about the caller rather than the
-// method: rejected credentials, or a proxy refusing on the server's behalf.
+// isInconclusive reports an answer that is about the caller or the server's
+// state rather than the method: rejected credentials, a proxy refusing on the
+// server's behalf, or a server that was rate limiting (429), in conflict with
+// another poller (409) or failing (5xx) and never looked at the request.
 func isInconclusive(err error) bool {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) {
 		return false
 	}
-	switch apiErr.code() {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	code := apiErr.code()
+	switch {
+	case code == http.StatusUnauthorized, code == http.StatusForbidden:
+		return true
+	case code == http.StatusConflict, code == http.StatusTooManyRequests, code >= http.StatusInternalServerError:
+		// The server answered about its own state, not about the method.
 		return true
 	}
 	// A 404 that is not Telegram's "method not found" came from something in
 	// front of the server, not from the server.
-	return apiErr.code() == http.StatusNotFound && !IsMethodNotFound(err)
+	return code == http.StatusNotFound && !IsMethodNotFound(err)
 }
 
 // Require is Probe as a single error.

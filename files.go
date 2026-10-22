@@ -63,7 +63,7 @@ func (c *Client) DownloadToFile(ctx context.Context, filePath, dst string, maxBy
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return parseAPIError("downloadFile", resp.StatusCode, resp.Body)
+		return c.redactAPI(parseAPIError("downloadFile", resp.StatusCode, resp.Body))
 	}
 	return writeLimited(dst, resp.Body, maxBytes)
 }

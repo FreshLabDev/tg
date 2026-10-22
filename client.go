@@ -101,9 +101,11 @@ func WithLogger(log *slog.Logger) Option {
 }
 
 // WithAllowedUpdates restricts long polling to the update kinds the bot
-// actually handles. Telegram's own default silently omits some kinds
-// (my_chat_member among them), so a bot that needs one must say so. Passing
-// nothing leaves the parameter out and keeps Telegram's default.
+// actually handles. Telegram's own default omits chat_member, message_reaction
+// and message_reaction_count, so a bot that needs one of them must say so.
+// Passing nothing leaves the parameter out, and then Telegram applies the list
+// that was last set for this bot token, by any process, which is the default
+// only until somebody sets another.
 func WithAllowedUpdates(kinds ...string) Option {
 	return func(c *Client) { c.allowed = kinds }
 }
