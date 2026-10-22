@@ -13,6 +13,8 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.1-alpha.1 - 2026-10-22
+
 ### Added
 
 - **Edits and reactions are decoded.** `Update` gained `EditedMessage`,
