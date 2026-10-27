@@ -13,6 +13,11 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.2 - 2026-10-27
+
+A photo, an animation or a document can be sent to one member of a group
+and changed in place while only they see it.
+
 ### Added
 
 - **Ephemeral media.** `CaptionOptions` gained `Ephemeral`, an `Ephemeral`
