@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -383,5 +384,58 @@ func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
 	}
 	if len(missing) != 0 {
 		t.Fatalf("missing = %v, want none: a 400 on an empty body means the method is there", missing)
+	}
+}
+
+// framyProbeMethods are the methods added for framy that Preflight can now
+// require. Each one is in probeSafe because Telegram's server reads its
+// mandatory parameter first and answers with a parameter error before it does
+// anything: sendAnimation without a file ("There is no animation in the
+// request"), the others without a chat ("chat_id is empty") or message ids.
+var framyProbeMethods = []string{"sendAnimation"}
+
+func TestPreflightCanRequireTheMethodsAddedForFramy(t *testing.T) {
+	var bodies []string
+	known := map[string]bool{}
+	for _, m := range framyProbeMethods {
+		known[m] = true
+	}
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"framyin_bot"}}`))
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]+" "+string(raw))
+		oldServer(known)(w, r)
+	})
+
+	if _, err := c.Preflight(context.Background(), Needs{Methods: framyProbeMethods}); err != nil {
+		t.Fatalf("Preflight on a server that has them: %v", err)
+	}
+	// Probing is a real call. These methods are only safe to probe because the
+	// body is empty, so the test pins that nothing else rides along.
+	for _, sent := range bodies {
+		if !strings.HasSuffix(sent, " {}") {
+			t.Fatalf("probe sent %q, want an empty object", sent)
+		}
+	}
+	if len(bodies) != len(framyProbeMethods) {
+		t.Fatalf("probes = %v, want one per method", bodies)
+	}
+
+	for _, method := range framyProbeMethods {
+		old, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/getMe") {
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"framyin_bot"}}`))
+				return
+			}
+			oldServer(map[string]bool{})(w, r)
+		})
+		_, err := old.Preflight(context.Background(), Needs{Methods: []string{method}})
+		var missing *MissingMethodsError
+		if !errors.As(err, &missing) || len(missing.Methods) != 1 || missing.Methods[0] != method {
+			t.Fatalf("Preflight against a server without %s: err = %v, want it named as missing", method, err)
+		}
 	}
 }

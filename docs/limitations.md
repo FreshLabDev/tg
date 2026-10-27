@@ -12,7 +12,7 @@ reading the source.
   a send is bounded by what the process can hold; anything genuinely large
   belongs on a self-hosted server, where `InputFileLocal` hands over a path
   instead of bytes.
-- **`sendVoice`, `sendVideoNote` and `sendAnimation` have no method.**
+- **`sendVoice` and `sendVideoNote` have no method.**
   `probeSafe` accepts `sendVoice`, so a bot can assert it exists on the server
   and still have to reach it through `Call`.
 - **`Probe` cannot be extended by a caller.** The safe list is unexported, and

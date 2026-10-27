@@ -33,6 +33,17 @@ Use this section for changes that are merged but not released yet.
   Telegram accepts `web_app` only in a private chat; the field comment says so.
   The struct comment now lists the actions a button can carry. This package
   still does not check that exactly one is set.
+- **`SendAnimation` and `InputMediaAnimation`.** `SendAnimation` takes the same
+  files as `SendVideo`: a `file_id` or a URL, a path on a `--local` server, or an
+  upload, which is multipart on its own. `AnimationOptions` has the caption
+  options, width, height, duration, `ShowCaptionAboveMedia` and `HasSpoiler`.
+  `InputMediaAnimation` is the same animation for `EditMessageMedia`, so a photo
+  can turn into a loop in place. maply uploaded an MP4 as a document with its own
+  HTTP client to get an animation; this replaces that, with tg's retries and
+  token redaction. Telegram does not accept an animation in an album, so
+  `SendMediaGroup` refuses one before sending anything. `sendAnimation` is in
+  `probeSafe`: with no file the server answers "There is no animation in the
+  request" before it does anything, so `Needs.Methods` can name it.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

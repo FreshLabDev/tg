@@ -448,3 +448,199 @@ func TestPhotoWithAWebAppButtonIsOneSend(t *testing.T) {
 		}
 	})
 }
+
+const animationResult = `{"ok":true,"result":{"message_id":30,"chat":{"id":42,"type":"private"},"date":1,` +
+	`"animation":{"file_id":"CgACnew","file_unique_id":"AgADu","width":720,"height":900,"duration":14,"mime_type":"video/mp4"},` +
+	`"document":{"file_id":"CgACnew","file_unique_id":"AgADu","mime_type":"video/mp4"}}}`
+
+// A file_id costs no upload, so an animation by file_id is the same JSON body
+// every other send makes, with the options the issue lists.
+func TestSendAnimationByFileIDStaysJSON(t *testing.T) {
+	handler, method, body := capture(t, animationResult)
+	c, _ := newTestClient(t, handler)
+
+	msg, err := c.SendAnimation(context.Background(), 42, InputFileString{Data: "CgACknown"}, AnimationOptions{
+		CaptionOptions: CaptionOptions{
+			ThreadID: 3, ReplyTo: 11, Caption: "<b>loop</b>",
+			Markup: &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "again", CallbackData: "again"}}}},
+		},
+		Width: 720, Height: 900, Duration: 14, ShowCaptionAboveMedia: true, HasSpoiler: true,
+	})
+	if err != nil {
+		t.Fatalf("SendAnimation: %v", err)
+	}
+	if *method != "sendAnimation" {
+		t.Fatalf("method = %q", *method)
+	}
+	if msg.MessageID != 30 || msg.Animation == nil || msg.Animation.FileID != "CgACnew" {
+		t.Fatalf("message = %+v, want the animation's file_id back", msg)
+	}
+	if msg.Document == nil || msg.Document.FileID != "CgACnew" {
+		t.Fatalf("document = %+v, want the backward-compatible copy", msg.Document)
+	}
+	want := map[string]any{
+		"chat_id": float64(42), "animation": "CgACknown", "caption": "<b>loop</b>", "parse_mode": "HTML",
+		"width": float64(720), "height": float64(900), "duration": float64(14),
+		"show_caption_above_media": true, "has_spoiler": true, "message_thread_id": float64(3),
+	}
+	for key, value := range want {
+		if (*body)[key] != value {
+			t.Errorf("%s = %v, want %v", key, (*body)[key], value)
+		}
+	}
+	if (*body)["reply_markup"] == nil || (*body)["reply_parameters"] == nil {
+		t.Errorf("reply_markup = %v, reply_parameters = %v", (*body)["reply_markup"], (*body)["reply_parameters"])
+	}
+}
+
+func TestSendAnimationOmitsWhatWasNotAskedFor(t *testing.T) {
+	handler, _, body := capture(t, animationResult)
+	c, _ := newTestClient(t, handler)
+
+	if _, err := c.SendAnimation(context.Background(), 42, InputFileString{Data: "id"}, AnimationOptions{}); err != nil {
+		t.Fatalf("SendAnimation: %v", err)
+	}
+	for _, absent := range []string{"caption", "parse_mode", "width", "height", "duration", "show_caption_above_media", "has_spoiler", "reply_markup", "message_thread_id"} {
+		if _, has := (*body)[absent]; has {
+			t.Fatalf("%s must be absent when it was not asked for", absent)
+		}
+	}
+}
+
+// maply uploaded an MP4 as a document with its own HTTP client to get an
+// animation. The upload is now a multipart sendAnimation like any other.
+func TestSendAnimationUploadsBytesAsMultipart(t *testing.T) {
+	handler, got := captureUpload(t, animationResult)
+	c, _ := newTestClient(t, handler)
+
+	msg, err := c.SendAnimation(context.Background(), 42, InputFileUpload{Filename: "loop.mp4", Data: strings.NewReader("mp4bytes")}, AnimationOptions{
+		CaptionOptions: CaptionOptions{Caption: "preview", Markup: &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{
+			{Text: "Open", WebApp: &WebAppInfo{URL: "https://framy.example/app"}},
+		}}}},
+		Width: 720, Height: 900, Duration: 14, HasSpoiler: true,
+	})
+	if err != nil {
+		t.Fatalf("SendAnimation: %v", err)
+	}
+	if got.method != "sendAnimation" {
+		t.Fatalf("method = %q", got.method)
+	}
+	if got.files["animation"] != "mp4bytes" || got.names["animation"] != "loop.mp4" {
+		t.Fatalf("animation part = %q named %q", got.files["animation"], got.names["animation"])
+	}
+	if _, has := got.fields["animation"]; has {
+		t.Fatal("an uploaded file must not also travel as a string parameter")
+	}
+	if got.fields["width"] != "720" || got.fields["height"] != "900" || got.fields["duration"] != "14" || got.fields["has_spoiler"] != "true" {
+		t.Fatalf("scalar fields = %v", got.fields)
+	}
+	if !strings.Contains(got.fields["reply_markup"], `"web_app":{"url":"https://framy.example/app"}`) {
+		t.Fatalf("reply_markup = %q", got.fields["reply_markup"])
+	}
+	if msg.Animation == nil || msg.Animation.FileID != "CgACnew" {
+		t.Fatalf("message = %+v", msg)
+	}
+}
+
+// On a self-hosted server a path on its disk is sent by reference, so an
+// animation larger than an upload allows costs the process no memory.
+func TestSendAnimationByLocalPath(t *testing.T) {
+	handler, method, body := capture(t, animationResult)
+	c, _ := newTestClient(t, handler)
+
+	if _, err := c.SendAnimation(context.Background(), 42, InputFileLocal{Path: "/data/results/loop.mp4"}, AnimationOptions{}); err != nil {
+		t.Fatalf("SendAnimation: %v", err)
+	}
+	if *method != "sendAnimation" || (*body)["animation"] != "file:///data/results/loop.mp4" {
+		t.Fatalf("method = %q, animation = %v", *method, (*body)["animation"])
+	}
+
+	cloud := New(testToken)
+	if _, err := cloud.SendAnimation(context.Background(), 42, InputFileLocal{Path: "/data/results/loop.mp4"}, AnimationOptions{}); err == nil ||
+		!strings.Contains(err.Error(), "self-hosted") {
+		t.Fatalf("err = %v, want a refusal naming the self-hosted server", err)
+	}
+}
+
+func TestSendAnimationRejectsAMissingFileBeforeSending(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a missing file must not reach the network")
+	})
+	if _, err := c.SendAnimation(context.Background(), 1, nil, AnimationOptions{}); err == nil {
+		t.Fatal("want a refusal for a missing file")
+	}
+	if _, err := c.SendAnimation(context.Background(), 1, InputFileString{}, AnimationOptions{}); err == nil {
+		t.Fatal("want a refusal for an empty identifier")
+	}
+}
+
+// framy's preview is a photo that turns into the generating loop and then into
+// the result, all through editMessageMedia.
+func TestEditMessageMediaTurnsAPhotoIntoAnAnimation(t *testing.T) {
+	t.Run("upload", func(t *testing.T) {
+		handler, got := captureUpload(t, `{"ok":true,"result":{"message_id":7}}`)
+		c, _ := newTestClient(t, handler)
+
+		err := c.EditMessageMedia(context.Background(), 42, 7, InputMediaAnimation{
+			Media:   InputFileUpload{Filename: "loop.mp4", Data: strings.NewReader("mp4")},
+			Caption: "<i>generating</i>", Width: 720, Height: 900, Duration: 14,
+			ShowCaptionAboveMedia: true, HasSpoiler: true,
+		}, nil)
+		if err != nil {
+			t.Fatalf("EditMessageMedia: %v", err)
+		}
+		var media map[string]any
+		if err := json.Unmarshal([]byte(got.fields["media"]), &media); err != nil {
+			t.Fatalf("media is not JSON: %v", err)
+		}
+		want := map[string]any{
+			"type": "animation", "media": "attach://media", "caption": "<i>generating</i>", "parse_mode": "HTML",
+			"width": float64(720), "height": float64(900), "duration": float64(14),
+			"show_caption_above_media": true, "has_spoiler": true,
+		}
+		for key, value := range want {
+			if media[key] != value {
+				t.Errorf("media.%s = %v, want %v", key, media[key], value)
+			}
+		}
+		if got.files["media"] != "mp4" {
+			t.Fatalf("uploaded part = %q", got.files["media"])
+		}
+	})
+
+	t.Run("file_id", func(t *testing.T) {
+		handler, method, body := capture(t, `{"ok":true,"result":{"message_id":7}}`)
+		c, _ := newTestClient(t, handler)
+
+		err := c.EditMessageMedia(context.Background(), 42, 7, InputMediaAnimation{Media: InputFileString{Data: "CgACknown"}}, nil)
+		if err != nil {
+			t.Fatalf("EditMessageMedia: %v", err)
+		}
+		media, _ := (*body)["media"].(map[string]any)
+		if *method != "editMessageMedia" || media["type"] != "animation" || media["media"] != "CgACknown" {
+			t.Fatalf("method = %q, media = %v", *method, media)
+		}
+		for _, absent := range []string{"caption", "parse_mode", "width", "height", "duration", "show_caption_above_media", "has_spoiler"} {
+			if _, has := media[absent]; has {
+				t.Errorf("media.%s must be absent when it was not asked for", absent)
+			}
+		}
+	})
+}
+
+// Telegram takes photos, videos, audio and documents in an album. An animation
+// would be refused after the other items were already uploaded.
+func TestSendMediaGroupRefusesAnAnimation(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an album with an animation must not reach the network")
+	})
+	for name, item := range map[string]InputMedia{
+		"value":   InputMediaAnimation{Media: InputFileString{Data: "id"}},
+		"pointer": &InputMediaAnimation{Media: InputFileString{Data: "id"}},
+	} {
+		_, err := c.SendMediaGroup(context.Background(), 1, []InputMedia{InputMediaPhoto{Media: InputFileString{Data: "p"}}, item}, 0)
+		if err == nil || !strings.Contains(err.Error(), "media[1]") {
+			t.Fatalf("%s: err = %v, want a refusal naming the item", name, err)
+		}
+	}
+}

@@ -27,6 +27,13 @@ import (
 // could succeed on its own must never appear here — getMe would simply run,
 // deleteWebhook would drop a webhook, and logOut would detach the bot from the
 // server and start a ten-minute cooldown.
+//
+// A method joins the list only after its handler in the server source
+// (tdlib/telegram-bot-api, telegram-bot-api/Client.cpp, process_<method>_query)
+// has been read to confirm that it validates before it acts. A method with no
+// required parameter never qualifies: on an empty body setMyDescription clears
+// the description and setChatMenuButton resets the menu button. sendAnimation,
+// for one, answers "There is no animation in the request" before anything else.
 var probeSafe = map[string]bool{
 	"answerCallbackQuery":      true,
 	"answerInlineQuery":        true,
@@ -42,6 +49,7 @@ var probeSafe = map[string]bool{
 	"getChat":                  true,
 	"getChatMember":            true,
 	"getFile":                  true,
+	"sendAnimation":            true,
 	"sendAudio":                true,
 	"sendChatAction":           true,
 	"sendDocument":             true,

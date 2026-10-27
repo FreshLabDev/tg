@@ -154,6 +154,21 @@ type VideoOptions struct {
 	SupportsStreaming bool
 }
 
+// AnimationOptions carries what Telegram cannot learn from a file it did not
+// decode. Like a video, an animation uploaded without its dimensions shows a
+// square placeholder until it has loaded.
+type AnimationOptions struct {
+	CaptionOptions
+	Width    int
+	Height   int
+	Duration int
+	// ShowCaptionAboveMedia puts the caption over the animation instead of under
+	// it.
+	ShowCaptionAboveMedia bool
+	// HasSpoiler hides the animation under a spoiler until the user taps it.
+	HasSpoiler bool
+}
+
 type AudioOptions struct {
 	CaptionOptions
 	Duration  int
@@ -218,6 +233,36 @@ func (c *Client) SendVideo(ctx context.Context, chatID int64, video InputFile, o
 		return Message{}, err
 	}
 	return c.sendMedia(ctx, "sendVideo", fields, files)
+}
+
+// SendAnimation sends a GIF, or an H.264/MPEG-4 AVC video without sound, which
+// clients show as an animation. Telegram's own endpoint takes up to 50 MB.
+//
+// The returned message holds the file in Animation, and also in Document, which
+// Telegram fills for backward compatibility. Animation.FileID is the one to keep
+// and to send again.
+func (c *Client) SendAnimation(ctx context.Context, chatID int64, animation InputFile, opts AnimationOptions) (Message, error) {
+	fields := mediaFields(chatID, opts.CaptionOptions)
+	if opts.Width > 0 {
+		fields["width"] = opts.Width
+	}
+	if opts.Height > 0 {
+		fields["height"] = opts.Height
+	}
+	if opts.Duration > 0 {
+		fields["duration"] = opts.Duration
+	}
+	if opts.ShowCaptionAboveMedia {
+		fields["show_caption_above_media"] = true
+	}
+	if opts.HasSpoiler {
+		fields["has_spoiler"] = true
+	}
+	var files []attachment
+	if err := c.attachTop(fields, &files, "animation", animation); err != nil {
+		return Message{}, err
+	}
+	return c.sendMedia(ctx, "sendAnimation", fields, files)
 }
 
 func (c *Client) SendAudio(ctx context.Context, chatID int64, audio InputFile, opts AudioOptions) (Message, error) {
@@ -293,6 +338,34 @@ func (m InputMediaVideo) item() (map[string]any, InputFile) {
 	return object, m.Media
 }
 
+// InputMediaAnimation is a GIF or an H.264/MPEG-4 AVC video without sound. In
+// [Client.EditMessageMedia] it replaces the media of a message with an
+// animation. An album cannot hold one, and [Client.SendMediaGroup] refuses it.
+type InputMediaAnimation struct {
+	Media                 InputFile
+	Caption               string
+	Width                 int
+	Height                int
+	Duration              int
+	ShowCaptionAboveMedia bool
+	HasSpoiler            bool
+}
+
+func (m InputMediaAnimation) item() (map[string]any, InputFile) {
+	object := mediaItem("animation", m.Caption)
+	if m.Width > 0 {
+		object["width"] = m.Width
+	}
+	if m.Height > 0 {
+		object["height"] = m.Height
+	}
+	if m.Duration > 0 {
+		object["duration"] = m.Duration
+	}
+	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
+	return object, m.Media
+}
+
 type InputMediaDocument struct {
 	Media                       InputFile
 	Caption                     string
@@ -305,6 +378,16 @@ func (m InputMediaDocument) item() (map[string]any, InputFile) {
 		object["disable_content_type_detection"] = true
 	}
 	return object, m.Media
+}
+
+// captionPlacement adds the two flags a photo, a video and an animation share.
+func captionPlacement(object map[string]any, above, spoiler bool) {
+	if above {
+		object["show_caption_above_media"] = true
+	}
+	if spoiler {
+		object["has_spoiler"] = true
+	}
 }
 
 func mediaItem(kind, caption string) map[string]any {
@@ -331,6 +414,10 @@ func (c *Client) SendMediaGroup(ctx context.Context, chatID int64, media []Input
 	var files []attachment
 	items := make([]map[string]any, 0, len(media))
 	for i, entry := range media {
+		switch entry.(type) {
+		case InputMediaAnimation, *InputMediaAnimation:
+			return nil, fmt.Errorf("media[%d]: an animation cannot be part of an album; send it with SendAnimation", i)
+		}
 		object, file := entry.item()
 		// The attach name only has to be unique within this request; the index
 		// makes it so and makes a captured request readable.
