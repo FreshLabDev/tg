@@ -26,6 +26,13 @@ Use this section for changes that are merged but not released yet.
   `ReplyToMessage`. `ExternalReplyInfo` models the attachments and the origin;
   the rest of the object is in `Message.Raw`. The Bot API version stays at 10.3:
   live photos are from 10.0.
+- **Three more button kinds.** `InlineKeyboardButton` gained `WebApp`
+  (`WebAppInfo`), `LoginURL` (`LoginURL`) and `CopyText` (`CopyTextButton`). A
+  bot that kept its own keyboard type only for `web_app`, and edited the buttons
+  in after a photo upload, can send the photo with its buttons in one call.
+  Telegram accepts `web_app` only in a private chat; the field comment says so.
+  The struct comment now lists the actions a button can carry. This package
+  still does not check that exactly one is set.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

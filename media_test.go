@@ -383,3 +383,68 @@ func TestSendMediaRejectsAnEmptyIdentifierBeforeSending(t *testing.T) {
 		t.Fatal("want a refusal for a missing file")
 	}
 }
+
+// maply sent a photo and then edited its buttons in a second call, because the
+// keyboard had no web_app. Both shapes of a send now carry it in the one call.
+func TestPhotoWithAWebAppButtonIsOneSend(t *testing.T) {
+	markup := &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{
+		{Text: "Guess", WebApp: &WebAppInfo{URL: "https://maply.example/"}},
+		{Text: "Copy", CopyText: &CopyTextButton{Text: "maply #1"}},
+	}}}
+
+	t.Run("by file_id", func(t *testing.T) {
+		var requests int
+		handler, method, body := capture(t, `{"ok":true,"result":{"message_id":1}}`)
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			handler(w, r)
+		})
+		if _, err := c.SendPhoto(context.Background(), 42, InputFileString{Data: "AgACknown"}, CaptionOptions{Caption: "maply #1", Markup: markup}); err != nil {
+			t.Fatalf("SendPhoto: %v", err)
+		}
+		if requests != 1 || *method != "sendPhoto" {
+			t.Fatalf("requests = %d, method = %q, want one sendPhoto", requests, *method)
+		}
+		raw, _ := json.Marshal((*body)["reply_markup"])
+		var sent InlineKeyboardMarkup
+		if err := json.Unmarshal(raw, &sent); err != nil || len(sent.InlineKeyboard) != 1 || len(sent.InlineKeyboard[0]) != 2 {
+			t.Fatalf("reply_markup = %s (%v)", raw, err)
+		}
+		if !strings.Contains(string(raw), `"web_app":{"url":"https://maply.example/"}`) || !strings.Contains(string(raw), `"copy_text":{"text":"maply #1"}`) {
+			t.Fatalf("wire names: reply_markup = %s", raw)
+		}
+		buttons := sent.InlineKeyboard[0]
+		if buttons[0].WebApp == nil || buttons[0].WebApp.URL != "https://maply.example/" {
+			t.Fatalf("web_app = %+v", buttons[0])
+		}
+		if buttons[1].CopyText == nil || buttons[1].CopyText.Text != "maply #1" {
+			t.Fatalf("copy_text = %+v", buttons[1])
+		}
+	})
+
+	t.Run("by upload", func(t *testing.T) {
+		var requests int
+		handler, got := captureUpload(t, `{"ok":true,"result":{"message_id":1}}`)
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			handler(w, r)
+		})
+		_, err := c.SendPhoto(context.Background(), 42, InputFileUpload{Filename: "maply.png", Data: strings.NewReader("png")}, CaptionOptions{Markup: markup})
+		if err != nil {
+			t.Fatalf("SendPhoto: %v", err)
+		}
+		if requests != 1 || got.method != "sendPhoto" {
+			t.Fatalf("requests = %d, method = %q, want one sendPhoto", requests, got.method)
+		}
+		var sent InlineKeyboardMarkup
+		if err := json.Unmarshal([]byte(got.fields["reply_markup"]), &sent); err != nil {
+			t.Fatalf("reply_markup is not JSON: %v", err)
+		}
+		if !strings.Contains(got.fields["reply_markup"], `"web_app":{"url":"https://maply.example/"}`) {
+			t.Fatalf("wire names: reply_markup = %q", got.fields["reply_markup"])
+		}
+		if len(sent.InlineKeyboard) != 1 || sent.InlineKeyboard[0][0].WebApp == nil || sent.InlineKeyboard[0][0].WebApp.URL != "https://maply.example/" {
+			t.Fatalf("reply_markup = %q", got.fields["reply_markup"])
+		}
+	})
+}

@@ -802,3 +802,41 @@ func TestAlbumAndReplyTypesMarshalLikeTheirBotAPIShape(t *testing.T) {
 		})
 	}
 }
+
+// Each of the three buttons marshals to what the Bot API documents, and only
+// the one that is set appears.
+func TestInlineKeyboardMarshalsWebAppLoginURLAndCopyText(t *testing.T) {
+	markup := InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{
+		{{Text: "Open framy", WebApp: &WebAppInfo{URL: "https://framy.example/app"}}},
+		{{Text: "Sign in", LoginURL: &LoginURL{
+			URL: "https://framy.example/auth/telegram", ForwardText: "Sign in to framy",
+			BotUsername: "framyin_bot", RequestWriteAccess: true,
+		}}},
+		{{Text: "Sign in", LoginURL: &LoginURL{URL: "https://framy.example/auth/telegram"}}},
+		{{Text: "Copy prompt", CopyText: &CopyTextButton{Text: "a cat in a hat"}}},
+	}}
+	raw, err := json.Marshal(markup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"inline_keyboard":[` +
+		`[{"text":"Open framy","web_app":{"url":"https://framy.example/app"}}],` +
+		`[{"text":"Sign in","login_url":{"url":"https://framy.example/auth/telegram","forward_text":"Sign in to framy","bot_username":"framyin_bot","request_write_access":true}}],` +
+		`[{"text":"Sign in","login_url":{"url":"https://framy.example/auth/telegram"}}],` +
+		`[{"text":"Copy prompt","copy_text":{"text":"a cat in a hat"}}]]}`
+	if string(raw) != want {
+		t.Fatalf("keyboard\n got %s\nwant %s", raw, want)
+	}
+}
+
+// An ordinary button must not grow the new fields: Telegram would read an
+// empty web_app object as a second action.
+func TestPlainButtonsStayFreeOfTheNewActions(t *testing.T) {
+	raw, err := json.Marshal(InlineKeyboardButton{Text: "Next", CallbackData: "next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"text":"Next","callback_data":"next"}` {
+		t.Fatalf("button = %s", raw)
+	}
+}

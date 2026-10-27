@@ -424,10 +424,24 @@ type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
 
+// InlineKeyboardButton is one button. The Bot API wants exactly one action on
+// it: CallbackData, URL, WebApp, LoginURL, CopyText,
+// SwitchInlineQueryCurrentChat or Disabled. This package does not check that.
 type InlineKeyboardButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data,omitempty"`
 	URL          string `json:"url,omitempty"`
+	// WebApp opens a Mini App. The Bot API documents it as available only in a
+	// private chat between a user and the bot, and not for a message sent on
+	// behalf of a business account, so a keyboard for a group or a channel
+	// leaves it out.
+	WebApp *WebAppInfo `json:"web_app,omitempty"`
+	// LoginURL signs the user in to a site. The site must check the hash of what
+	// Telegram appends to the URL, and the URL's domain must be the one linked to
+	// the bot in BotFather. It is not supported in an ephemeral message.
+	LoginURL *LoginURL `json:"login_url,omitempty"`
+	// CopyText puts a text on the user's clipboard when the button is tapped.
+	CopyText *CopyTextButton `json:"copy_text,omitempty"`
 	// SwitchInlineQueryCurrentChat opens inline mode in the chat the button is
 	// in, with this string already typed. It is a pointer because the empty
 	// string is the useful value -- "open inline search with nothing typed" --
@@ -439,6 +453,33 @@ type InlineKeyboardButton struct {
 	// Disabled is the Bot API 10.3 action slot for an inert button. It cannot
 	// be combined with CallbackData or URL.
 	Disabled *DisabledButton `json:"disabled,omitempty"`
+}
+
+// WebAppInfo describes the Mini App a button or the menu button opens.
+type WebAppInfo struct {
+	// URL is an HTTPS address.
+	URL string `json:"url"`
+}
+
+// LoginURL is the parameter of a login button. Telegram opens URL with the
+// user's data added to the query string after the user agrees, or the plain URL
+// if they refuse.
+type LoginURL struct {
+	// URL is an HTTPS address on a domain linked to the bot.
+	URL string `json:"url"`
+	// ForwardText replaces the button's text in forwarded messages.
+	ForwardText string `json:"forward_text,omitempty"`
+	// BotUsername names a different bot to authorize the user; the URL's domain
+	// must be linked to that one. Empty means this bot.
+	BotUsername string `json:"bot_username,omitempty"`
+	// RequestWriteAccess asks the user to allow the bot to message them.
+	RequestWriteAccess bool `json:"request_write_access,omitempty"`
+}
+
+// CopyTextButton is the parameter of a copy button.
+type CopyTextButton struct {
+	// Text is what is copied, 1 to 256 characters.
+	Text string `json:"text"`
 }
 
 // DisabledButton is an empty Bot API 10.3 object: the presence of the field is
