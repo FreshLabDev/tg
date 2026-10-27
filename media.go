@@ -303,13 +303,21 @@ type InputMedia interface {
 	item() (map[string]any, InputFile)
 }
 
+// InputMediaPhoto is a photo. The caption is HTML, like every other text this
+// package sends.
 type InputMediaPhoto struct {
 	Media   InputFile
 	Caption string
+	// ShowCaptionAboveMedia puts the caption over the photo instead of under it.
+	ShowCaptionAboveMedia bool
+	// HasSpoiler hides the photo under a spoiler until the user taps it.
+	HasSpoiler bool
 }
 
 func (m InputMediaPhoto) item() (map[string]any, InputFile) {
-	return mediaItem("photo", m.Caption), m.Media
+	object := mediaItem("photo", m.Caption)
+	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
+	return object, m.Media
 }
 
 type InputMediaVideo struct {
@@ -319,6 +327,10 @@ type InputMediaVideo struct {
 	Height            int
 	Duration          int
 	SupportsStreaming bool
+	// ShowCaptionAboveMedia puts the caption over the video instead of under it.
+	ShowCaptionAboveMedia bool
+	// HasSpoiler hides the video under a spoiler until the user taps it.
+	HasSpoiler bool
 }
 
 func (m InputMediaVideo) item() (map[string]any, InputFile) {
@@ -335,6 +347,7 @@ func (m InputMediaVideo) item() (map[string]any, InputFile) {
 	if m.SupportsStreaming {
 		object["supports_streaming"] = true
 	}
+	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
 	return object, m.Media
 }
 
@@ -446,7 +459,50 @@ func (c *Client) SendMediaGroup(ctx context.Context, chatID int64, media []Input
 // how a paged gallery moves between pages inside one message instead of
 // posting a new one for every tap. A "message is not modified" answer is
 // success, exactly as it is for [Client.EditMessageText].
+//
+// It returns nothing but the error. A caller that needs the edited message --
+// the file_id of a file it just uploaded, to send it again -- uses
+// [Client.EditMessageMediaMessage].
 func (c *Client) EditMessageMedia(ctx context.Context, chatID, messageID int64, media InputMedia, markup *InlineKeyboardMarkup) error {
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	err := c.editMessageMedia(ctx, chatID, messageID, media, markup, &resp)
+	if IsMessageNotModified(err) {
+		return nil
+	}
+	return err
+}
+
+// EditMessageMediaMessage is [Client.EditMessageMedia] that also returns the
+// edited message, which is where Telegram reports the file_id of a file the
+// edit uploaded: in Photo, Video, Animation or Document, whichever the new media
+// is. The caption goes with the media in the same call, as HTML, with the
+// placement and spoiler options on [InputMediaPhoto], [InputMediaVideo] and
+// [InputMediaAnimation].
+//
+// A "message is not modified" answer is returned as the error, unlike
+// [Client.EditMessageMedia]: there is no message to return, and a zero Message
+// with a nil error would read as an edit that succeeded and carries no file.
+// [IsMessageNotModified] tells it apart.
+//
+// Editing an inline message returns true instead of a message, so it is not
+// supported here: the call needs a chat and a message id.
+func (c *Client) EditMessageMediaMessage(ctx context.Context, chatID, messageID int64, media InputMedia, markup *InlineKeyboardMarkup) (Message, error) {
+	var resp struct {
+		OK     bool    `json:"ok"`
+		Result Message `json:"result"`
+	}
+	if err := c.editMessageMedia(ctx, chatID, messageID, media, markup, &resp); err != nil {
+		return Message{}, err
+	}
+	if !resp.OK {
+		return Message{}, okFalse("editMessageMedia")
+	}
+	return resp.Result, nil
+}
+
+func (c *Client) editMessageMedia(ctx context.Context, chatID, messageID int64, media InputMedia, markup *InlineKeyboardMarkup, out any) error {
 	if media == nil {
 		return fmt.Errorf("editMessageMedia requires media")
 	}
@@ -462,16 +518,7 @@ func (c *Client) EditMessageMedia(ctx context.Context, chatID, messageID int64, 
 	if markup != nil {
 		fields["reply_markup"] = markup
 	}
-	var resp struct {
-		OK bool `json:"ok"`
-	}
-	if err := c.submit(ctx, "editMessageMedia", fields, files, &resp); err != nil {
-		if IsMessageNotModified(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return c.submit(ctx, "editMessageMedia", fields, files, out)
 }
 
 // EditMessageReplyMarkup changes only a message's buttons. It is what removes

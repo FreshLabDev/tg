@@ -44,6 +44,18 @@ Use this section for changes that are merged but not released yet.
   `SendMediaGroup` refuses one before sending anything. `sendAnimation` is in
   `probeSafe`: with no file the server answers "There is no animation in the
   request" before it does anything, so `Needs.Methods` can name it.
+- **`EditMessageMediaMessage` returns the edited `Message`.** The `file_id` of a
+  file an edit uploaded is only in that answer, and `EditMessageMedia` threw it
+  away. The new method takes the same arguments and returns `(Message, error)`.
+  Unlike `EditMessageMedia`, it returns "message is not modified" as the error
+  (`IsMessageNotModified`) instead of swallowing it, because there is no message
+  to return and a zero `Message` with a nil error would look like an edit that
+  worked. An edit of an inline message is still not possible: it needs the
+  `inline_message_id` work and returns `true`, not a message.
+- **Caption options on the media types.** `InputMediaPhoto`, `InputMediaVideo`
+  and `InputMediaAnimation` take `ShowCaptionAboveMedia` and `HasSpoiler`, in an
+  edit and in an album. The caption was already HTML, so a caption and its
+  placement go in the same call as the media.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

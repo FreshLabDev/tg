@@ -644,3 +644,129 @@ func TestSendMediaGroupRefusesAnAnimation(t *testing.T) {
 		}
 	}
 }
+
+// framy keeps the file_id of every result for inline mode and for sending it
+// again, and an edit that uploads the result is the only place it appears.
+func TestEditMessageMediaMessageReturnsTheNewFileID(t *testing.T) {
+	var requests int
+	handler, got := captureUpload(t, `{"ok":true,"result":{"message_id":7,"chat":{"id":42,"type":"private"},"date":1,`+
+		`"photo":[{"file_id":"AgACsmall","file_unique_id":"AQADs","width":90,"height":60},{"file_id":"AgACnew","file_unique_id":"AQADn","width":1280,"height":853}],`+
+		`"caption":"<b>done</b>","show_caption_above_media":true,"has_media_spoiler":true}}`)
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		handler(w, r)
+	})
+
+	msg, err := c.EditMessageMediaMessage(context.Background(), 42, 7,
+		InputMediaPhoto{
+			Media: InputFileUpload{Filename: "result.jpg", Data: strings.NewReader("jpeg")}, Caption: "<b>done</b>",
+			ShowCaptionAboveMedia: true, HasSpoiler: true,
+		},
+		&InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "again", CallbackData: "again"}}}})
+	if err != nil {
+		t.Fatalf("EditMessageMediaMessage: %v", err)
+	}
+	if requests != 1 || got.method != "editMessageMedia" {
+		t.Fatalf("requests = %d, method = %q: the caption must not cost a second call", requests, got.method)
+	}
+	if len(msg.Photo) != 2 || msg.Photo[1].FileID != "AgACnew" {
+		t.Fatalf("photo = %+v, want the new file_id back", msg.Photo)
+	}
+	if msg.MessageID != 7 || !msg.HasMediaSpoiler {
+		t.Fatalf("message = %+v", msg)
+	}
+	var media map[string]any
+	if err := json.Unmarshal([]byte(got.fields["media"]), &media); err != nil {
+		t.Fatalf("media is not JSON: %v", err)
+	}
+	want := map[string]any{
+		"type": "photo", "media": "attach://media", "caption": "<b>done</b>", "parse_mode": "HTML",
+		"show_caption_above_media": true, "has_spoiler": true,
+	}
+	for key, value := range want {
+		if media[key] != value {
+			t.Errorf("media.%s = %v, want %v", key, media[key], value)
+		}
+	}
+	if got.files["media"] != "jpeg" || got.fields["reply_markup"] == "" {
+		t.Fatalf("uploaded part = %q, reply_markup = %q", got.files["media"], got.fields["reply_markup"])
+	}
+}
+
+func TestEditMessageMediaMessageReturnsAnAnimationsFileID(t *testing.T) {
+	handler, _, body := capture(t, animationResult)
+	c, _ := newTestClient(t, handler)
+
+	msg, err := c.EditMessageMediaMessage(context.Background(), 42, 7,
+		InputMediaVideo{Media: InputFileString{Data: "BAACknown"}, Caption: "clip", ShowCaptionAboveMedia: true, HasSpoiler: true}, nil)
+	if err != nil {
+		t.Fatalf("EditMessageMediaMessage: %v", err)
+	}
+	if msg.Animation == nil || msg.Animation.FileID != "CgACnew" {
+		t.Fatalf("message = %+v", msg)
+	}
+	media, _ := (*body)["media"].(map[string]any)
+	if media["type"] != "video" || media["show_caption_above_media"] != true || media["has_spoiler"] != true || media["parse_mode"] != "HTML" {
+		t.Fatalf("media = %v", media)
+	}
+	if _, has := (*body)["reply_markup"]; has {
+		t.Fatal("reply_markup must be absent when no keyboard was given")
+	}
+}
+
+// The placement flags are part of every item of an album too.
+func TestAlbumItemsCarryTheirOwnSpoilerAndCaptionPlacement(t *testing.T) {
+	handler, got := captureUpload(t, `{"ok":true,"result":[{"message_id":1},{"message_id":2}]}`)
+	c, _ := newTestClient(t, handler)
+
+	_, err := c.SendMediaGroup(context.Background(), 42, []InputMedia{
+		InputMediaPhoto{Media: InputFileString{Data: "p"}, Caption: "first", HasSpoiler: true},
+		InputMediaVideo{Media: InputFileUpload{Filename: "v.mp4", Data: strings.NewReader("mp4")}, ShowCaptionAboveMedia: true},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SendMediaGroup: %v", err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(got.fields["media"]), &items); err != nil {
+		t.Fatalf("media is not JSON: %v", err)
+	}
+	if items[0]["has_spoiler"] != true || items[0]["show_caption_above_media"] != nil {
+		t.Fatalf("first item = %v, want a spoiler and no placement", items[0])
+	}
+	if items[1]["show_caption_above_media"] != true || items[1]["has_spoiler"] != nil {
+		t.Fatalf("second item = %v, want a placement and no spoiler", items[1])
+	}
+}
+
+// The one-value method swallows "message is not modified". The method that
+// returns the message cannot: it has nothing to return, and a zero Message with
+// a nil error would look like an edit that worked.
+func TestEditMessageMediaMessageReportsNotModifiedAsTheError(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`))
+	})
+
+	msg, err := c.EditMessageMediaMessage(context.Background(), 1, 2, InputMediaPhoto{Media: InputFileString{Data: "id"}}, nil)
+	if !IsMessageNotModified(err) {
+		t.Fatalf("err = %v, want the not-modified error", err)
+	}
+	if msg.MessageID != 0 {
+		t.Fatalf("message = %+v, want none", msg)
+	}
+	if err := c.EditMessageMedia(context.Background(), 1, 2, InputMediaPhoto{Media: InputFileString{Data: "id"}}, nil); err != nil {
+		t.Fatalf("EditMessageMedia must keep treating it as success: %v", err)
+	}
+}
+
+func TestEditMessageMediaMessageRefusesMissingMediaBeforeSending(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an edit without media must not reach the network")
+	})
+	if _, err := c.EditMessageMediaMessage(context.Background(), 1, 2, nil, nil); err == nil {
+		t.Fatal("want a refusal for nil media")
+	}
+	if _, err := c.EditMessageMediaMessage(context.Background(), 1, 2, InputMediaPhoto{}, nil); err == nil {
+		t.Fatal("want a refusal for media with no file")
+	}
+}
