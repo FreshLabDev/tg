@@ -398,9 +398,12 @@ func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
 // anything: sendAnimation without a file ("There is no animation in the
 // request"), editMessageCaption without a message ("Message identifier is not
 // specified"), deleteMessages without ids ("Message identifiers are not
-// specified"), the reactions without a chat ("chat_id is empty").
+// specified"), the reactions without a chat ("chat_id is empty"), the
+// ephemeral edits without media ("Parameter \"media\" is required") or a
+// receiver ("Invalid receiver_user_id specified").
 var framyProbeMethods = []string{
-	"deleteMessageReaction", "deleteMessages", "editMessageCaption", "sendAnimation", "setMessageReaction",
+	"deleteMessageReaction", "deleteMessages", "editEphemeralMessageCaption", "editEphemeralMessageMedia",
+	"editEphemeralMessageReplyMarkup", "editMessageCaption", "sendAnimation", "setMessageReaction",
 }
 
 func TestPreflightCanRequireTheMethodsAddedForFramy(t *testing.T) {

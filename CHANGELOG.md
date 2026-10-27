@@ -13,6 +13,24 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Added
+
+- **Ephemeral media.** `CaptionOptions` gained `Ephemeral`, an `Ephemeral`
+  with the receiver, the button press that authorizes the send and
+  `ReplaceCallbackQueryMessage`, and `ReplyToEphemeral`, the incoming
+  ephemeral message being answered. `SendPhoto`, `SendAnimation`,
+  `SendVideo`, `SendAudio` and `SendDocument` take them, uploads included. A
+  bot that is not an admin of the chat needs the press or the ephemeral
+  message, within 15 seconds; an admin needs neither.
+- **`EditEphemeralMessageMedia`, `EditEphemeralMessageCaption` and
+  `EditEphemeralMessageReplyMarkup`.** The media edit uploads a new file as
+  `EditMessageMedia` does. Telegram answers these with true, not a message,
+  so the file_id of an upload is not reported. "Message is not modified" is
+  success, as for the other edits.
+- The three edits are in `probeSafe`: on an empty body Telegram's server
+  asks for the media or the receiver before it does anything, so Preflight
+  can require them.
+
 ## v0.2.0-alpha.1 - 2026-10-27
 
 ### Added

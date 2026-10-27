@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package tg
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Ephemeral messages (Bot API 10.3) are visible to one person in a group. Two
 // details decide whether a call succeeds:
@@ -12,6 +15,34 @@ import "context"
 //     message being answered, within a 15-second window, or the callback query
 //     of a tapped button. After that window a fresh ephemeral message is
 //     refused, so long work must edit a placeholder posted immediately.
+
+// Ephemeral addresses a send to one member of a group: SendPhoto,
+// SendAnimation, SendVideo, SendAudio and SendDocument take it in their
+// options. A bot that is an administrator of the chat may send one at any
+// time. Any other bot needs what authorizes it, within 15 seconds: the press
+// in CallbackQueryID, or the incoming ephemeral message in
+// CaptionOptions.ReplyToEphemeral.
+type Ephemeral struct {
+	ReceiverUserID int64
+	// CallbackQueryID is the button press the message answers.
+	CallbackQueryID string
+	// ReplaceCallbackQueryMessage shows the message to the receiver in place
+	// of the one whose button was pressed; the others keep seeing that one. It
+	// must be false for a press on an ephemeral message, which is edited with
+	// the EditEphemeral methods instead.
+	ReplaceCallbackQueryMessage bool
+}
+
+func (e *Ephemeral) fields() map[string]any {
+	params := map[string]any{"receiver_user_id": e.ReceiverUserID}
+	if e.CallbackQueryID != "" {
+		params["callback_query_id"] = e.CallbackQueryID
+	}
+	if e.ReplaceCallbackQueryMessage {
+		params["replace_callback_query_message"] = true
+	}
+	return params
+}
 
 // SendEphemeralMessage answers a message so that only receiverUserID sees it.
 func (c *Client) SendEphemeralMessage(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, text string, markup *InlineKeyboardMarkup) (Message, error) {
@@ -72,6 +103,53 @@ func (c *Client) EditEphemeralRichHTML(ctx context.Context, chatID, receiverUser
 }
 
 func (c *Client) editEphemeral(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, content map[string]any, markup *InlineKeyboardMarkup) error {
+	return c.editEphemeralWith(ctx, "editEphemeralMessageText", chatID, receiverUserID, ephemeralMessageID, content, nil, markup)
+}
+
+// EditEphemeralMessageMedia replaces the file of an ephemeral message, as
+// [Client.EditMessageMedia] does for a message in the chat: a file_id, a URL,
+// a path on a --local server or an upload, with the caption and its options
+// on the InputMedia. Telegram returns no message, so the file_id of an upload
+// is not reported. A "message is not modified" answer is success.
+func (c *Client) EditEphemeralMessageMedia(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, media InputMedia, markup *InlineKeyboardMarkup) error {
+	if media == nil {
+		return fmt.Errorf("editEphemeralMessageMedia requires media")
+	}
+	object, file := media.item()
+	var files []attachment
+	value, err := c.attachInner(&files, "media", file)
+	if err != nil {
+		return err
+	}
+	object["media"] = value
+	return c.editEphemeralWith(ctx, "editEphemeralMessageMedia", chatID, receiverUserID, ephemeralMessageID, map[string]any{"media": object}, files, markup)
+}
+
+// EditEphemeralMessageCaption replaces the caption of an ephemeral message.
+// The caption is HTML and an empty one removes it, as in
+// [Client.EditMessageCaption]; opts.Markup is the keyboard after the edit.
+// A "message is not modified" answer is success.
+func (c *Client) EditEphemeralMessageCaption(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, caption string, opts EditCaptionOptions) error {
+	content := map[string]any{"caption": caption}
+	if caption != "" {
+		content["parse_mode"] = "HTML"
+	}
+	if opts.ShowCaptionAboveMedia {
+		content["show_caption_above_media"] = true
+	}
+	return c.editEphemeralWith(ctx, "editEphemeralMessageCaption", chatID, receiverUserID, ephemeralMessageID, content, nil, opts.Markup)
+}
+
+// EditEphemeralMessageReplyMarkup changes only the buttons of an ephemeral
+// message; nil takes them away. A "message is not modified" answer is
+// success.
+func (c *Client) EditEphemeralMessageReplyMarkup(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, markup *InlineKeyboardMarkup) error {
+	return c.editEphemeralWith(ctx, "editEphemeralMessageReplyMarkup", chatID, receiverUserID, ephemeralMessageID, nil, nil, markup)
+}
+
+// editEphemeralWith runs one of the editEphemeralMessage methods. They address
+// the message by a flat receiver_user_id, unlike a send, and answer true.
+func (c *Client) editEphemeralWith(ctx context.Context, method string, chatID, receiverUserID, ephemeralMessageID int64, content map[string]any, files []attachment, markup *InlineKeyboardMarkup) error {
 	req := map[string]any{
 		"chat_id":              chatID,
 		"receiver_user_id":     receiverUserID,
@@ -86,14 +164,14 @@ func (c *Client) editEphemeral(ctx context.Context, chatID, receiverUserID, ephe
 	var resp struct {
 		OK bool `json:"ok"`
 	}
-	if err := c.post(ctx, "editEphemeralMessageText", req, &resp); err != nil {
+	if err := c.submit(ctx, method, req, files, &resp); err != nil {
 		if IsMessageNotModified(err) {
 			return nil
 		}
 		return err
 	}
 	if !resp.OK {
-		return okFalse("editEphemeralMessageText")
+		return okFalse(method)
 	}
 	return nil
 }

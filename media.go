@@ -139,8 +139,15 @@ type CaptionOptions struct {
 	ThreadID int
 	// ReplyTo answers a message; zero sends a standalone one.
 	ReplyTo int64
-	Caption string
-	Markup  *InlineKeyboardMarkup
+	// ReplyToEphemeral answers an incoming ephemeral message instead. The
+	// reply must itself be ephemeral, and Telegram takes it for 15 seconds
+	// after the message came.
+	ReplyToEphemeral int64
+	Caption          string
+	Markup           *InlineKeyboardMarkup
+	// Ephemeral sends the message to one member of the group only. Nil sends
+	// it to the chat.
+	Ephemeral *Ephemeral
 }
 
 // VideoOptions carries what Telegram cannot learn from a file it did not
@@ -189,11 +196,20 @@ func mediaFields(chatID int64, opts CaptionOptions) map[string]any {
 	if opts.ThreadID > 0 {
 		req["message_thread_id"] = opts.ThreadID
 	}
-	if opts.ReplyTo > 0 {
+	switch {
+	case opts.ReplyToEphemeral > 0:
+		req["reply_parameters"] = map[string]any{"ephemeral_message_id": opts.ReplyToEphemeral}
+	case opts.ReplyTo > 0 && opts.Ephemeral != nil:
+		// Telegram sends an ephemeral reply only to a message that is there.
+		req["reply_parameters"] = map[string]any{"message_id": opts.ReplyTo}
+	case opts.ReplyTo > 0:
 		req["reply_parameters"] = map[string]any{
 			"message_id":                  opts.ReplyTo,
 			"allow_sending_without_reply": true,
 		}
+	}
+	if opts.Ephemeral != nil {
+		req["ephemeral_message_parameters"] = opts.Ephemeral.fields()
 	}
 	if opts.Caption != "" {
 		req["caption"] = opts.Caption
