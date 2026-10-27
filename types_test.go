@@ -536,3 +536,269 @@ func TestNewTypesMarshalLikeTheirBotAPIShape(t *testing.T) {
 		})
 	}
 }
+
+// An album is not one update: every item arrives as its own message, and
+// media_group_id is the only thing that says they belong together. The caption
+// is on one of them.
+func TestAlbumItemsShareAMediaGroupID(t *testing.T) {
+	const group = `"media_group_id":"13059823741123"`
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":[` +
+			`{"update_id":20,"message":{"message_id":701,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000400,` + group + `,` +
+			`"photo":[{"file_id":"AgAC1s","file_unique_id":"AQAD1s","file_size":1200,"width":90,"height":60},` +
+			`{"file_id":"AgAC1l","file_unique_id":"AQAD1l","file_size":98000,"width":1280,"height":853}],"caption":"/f make these night"}},` +
+			`{"update_id":21,"message":{"message_id":702,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000400,` + group + `,` +
+			`"photo":[{"file_id":"AgAC2s","file_unique_id":"AQAD2s","file_size":1100,"width":90,"height":60},` +
+			`{"file_id":"AgAC2l","file_unique_id":"AQAD2l","file_size":87000,"width":1280,"height":853}]}},` +
+			`{"update_id":22,"message":{"message_id":703,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000401,"media_group_id":"13059823741999",` +
+			`"photo":[{"file_id":"AgAC3l","file_unique_id":"AQAD3l","file_size":70000,"width":1280,"height":853}]}}]}`))
+	})
+
+	updates, err := c.GetUpdates(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("GetUpdates: %v", err)
+	}
+	if len(updates) != 3 {
+		t.Fatalf("updates = %d, want 3", len(updates))
+	}
+	first, second, other := updates[0].Message, updates[1].Message, updates[2].Message
+	if first == nil || second == nil || other == nil {
+		t.Fatalf("an album item was dropped: %+v", updates)
+	}
+	if first.MediaGroupID != "13059823741123" || second.MediaGroupID != first.MediaGroupID {
+		t.Fatalf("media_group_id = %q and %q, want the same non-empty id", first.MediaGroupID, second.MediaGroupID)
+	}
+	if other.MediaGroupID == first.MediaGroupID {
+		t.Fatal("a different album must have a different id")
+	}
+	if first.Caption == "" || second.Caption != "" {
+		t.Fatalf("captions = %q and %q, want one on the first item only", first.Caption, second.Caption)
+	}
+	if len(first.Photo) != 2 || first.Photo[1].FileID != "AgAC1l" {
+		t.Fatalf("photo = %+v", first.Photo)
+	}
+}
+
+func TestMessageDecodesLivePhotoAlbumAndSpoilerFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		check func(t *testing.T, m Message)
+	}{
+		{
+			name: "live photo arrives together with photo",
+			input: `{"message_id":710,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000500,"media_group_id":"777",` +
+				`"live_photo":{"photo":[{"file_id":"AgACs","file_unique_id":"AQADs","file_size":900,"width":90,"height":120},` +
+				`{"file_id":"AgACl","file_unique_id":"AQADl","file_size":64000,"width":960,"height":1280}],` +
+				`"file_id":"BAACv","file_unique_id":"AQADv","width":960,"height":1280,"duration":3,"mime_type":"video/mp4","file_size":812345},` +
+				`"photo":[{"file_id":"AgACs","file_unique_id":"AQADs","file_size":900,"width":90,"height":120},` +
+				`{"file_id":"AgACl","file_unique_id":"AQADl","file_size":64000,"width":960,"height":1280}],"caption":"morning"}`,
+			check: func(t *testing.T, m Message) {
+				want := LivePhoto{
+					Photo: []Photo{
+						{FileID: "AgACs", FileUniqueID: "AQADs", Width: 90, Height: 120, FileSize: 900},
+						{FileID: "AgACl", FileUniqueID: "AQADl", Width: 960, Height: 1280, FileSize: 64000},
+					},
+					FileID: "BAACv", FileUniqueID: "AQADv", Width: 960, Height: 1280, Duration: 3,
+					MimeType: "video/mp4", FileSize: 812345,
+				}
+				if !reflect.DeepEqual(m.LivePhoto, &want) {
+					t.Fatalf("live_photo = %+v, want %+v", m.LivePhoto, &want)
+				}
+				if len(m.Photo) != 2 || m.Photo[1].FileID != "AgACl" {
+					t.Fatalf("photo = %+v, want the still frame's sizes as well", m.Photo)
+				}
+				if m.MediaGroupID != "777" {
+					t.Fatalf("media_group_id = %q: a live photo can be in an album", m.MediaGroupID)
+				}
+			},
+		},
+		{
+			name: "plain photo has no live photo",
+			input: `{"message_id":711,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000510,` +
+				`"photo":[{"file_id":"AgACp","file_unique_id":"AQADp","width":800,"height":600}]}`,
+			check: func(t *testing.T, m Message) {
+				if m.LivePhoto != nil || m.MediaGroupID != "" || m.HasMediaSpoiler || m.ExternalReply != nil {
+					t.Fatalf("a plain photo grew fields: %+v", m)
+				}
+			},
+		},
+		{
+			name: "photo under a spoiler",
+			input: `{"message_id":712,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000520,"has_media_spoiler":true,` +
+				`"photo":[{"file_id":"AgACq","file_unique_id":"AQADq","width":800,"height":600}],"caption":"hidden"}`,
+			check: func(t *testing.T, m Message) {
+				if !m.HasMediaSpoiler {
+					t.Fatal("has_media_spoiler was dropped")
+				}
+			},
+		},
+		{
+			name: "reply to a photo from a channel",
+			input: `{"message_id":713,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000530,"text":"/f in anime style",` +
+				`"external_reply":{"origin":{"type":"channel","chat":{"id":-1009876543210,"title":"Photos","type":"channel"},` +
+				`"message_id":55,"author_signature":"Ann","date":1760000000},` +
+				`"chat":{"id":-1009876543210,"title":"Photos","type":"channel"},"message_id":55,` +
+				`"photo":[{"file_id":"AgACx","file_unique_id":"AQADx","file_size":50000,"width":1024,"height":768}],"has_media_spoiler":true}}`,
+			check: func(t *testing.T, m Message) {
+				r := m.ExternalReply
+				if r == nil {
+					t.Fatal("external_reply was dropped")
+				}
+				if m.ReplyToMessage != nil {
+					t.Fatal("a reply from another chat is external_reply, not reply_to_message")
+				}
+				if r.Origin.Type != OriginChannel || r.Origin.Chat == nil || r.Origin.Chat.ID != -1009876543210 ||
+					r.Origin.MessageID != 55 || r.Origin.AuthorSignature != "Ann" || r.Origin.Date != 1760000000 {
+					t.Fatalf("origin = %+v", r.Origin)
+				}
+				if r.Chat == nil || r.Chat.ID != -1009876543210 || r.MessageID != 55 {
+					t.Fatalf("chat = %+v, message_id = %d", r.Chat, r.MessageID)
+				}
+				if len(r.Photo) != 1 || r.Photo[0].FileID != "AgACx" || !r.HasMediaSpoiler {
+					t.Fatalf("photo = %+v, spoiler = %v", r.Photo, r.HasMediaSpoiler)
+				}
+			},
+		},
+		{
+			name: "reply to a hidden user in a private chat names no chat",
+			input: `{"message_id":714,"from":` + sampleUser + `,"chat":{"id":5550001,"first_name":"Ann","type":"private"},"date":1760000540,` +
+				`"external_reply":{"origin":{"type":"hidden_user","sender_user_name":"Bob","date":1760000100},` +
+				`"video":{"file_id":"BAACz","file_unique_id":"AQADz","width":640,"height":360,"duration":5}}}`,
+			check: func(t *testing.T, m Message) {
+				r := m.ExternalReply
+				if r == nil {
+					t.Fatal("external_reply was dropped")
+				}
+				if r.Origin.Type != OriginHiddenUser || r.Origin.SenderUserName != "Bob" || r.Origin.SenderUser != nil {
+					t.Fatalf("origin = %+v", r.Origin)
+				}
+				if r.Chat != nil || r.MessageID != 0 {
+					t.Fatalf("chat = %+v, message_id = %d, want neither for a chat that is not a supergroup or a channel", r.Chat, r.MessageID)
+				}
+				if r.Video == nil || r.Video.FileID != "BAACz" || r.Photo != nil {
+					t.Fatalf("video = %+v, photo = %+v", r.Video, r.Photo)
+				}
+			},
+		},
+		{
+			name: "reply to a live photo in another topic",
+			input: `{"message_id":715,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000550,"text":"/f",` +
+				`"external_reply":{"origin":{"type":"user","sender_user":` + sampleUser + `,"date":1760000200},` +
+				`"chat":` + sampleSupergroup + `,"message_id":60,` +
+				`"live_photo":{"file_id":"BAACw","file_unique_id":"AQADw","width":960,"height":1280,"duration":2},` +
+				`"photo":[{"file_id":"AgACw","file_unique_id":"AQADw2","width":960,"height":1280}]}}`,
+			check: func(t *testing.T, m Message) {
+				r := m.ExternalReply
+				if r == nil || r.LivePhoto == nil || r.LivePhoto.FileID != "BAACw" {
+					t.Fatalf("external_reply = %+v", r)
+				}
+				if len(r.Photo) != 1 {
+					t.Fatalf("photo = %+v, want the still frame as well", r.Photo)
+				}
+				if r.Origin.Type != OriginUser || r.Origin.SenderUser == nil || r.Origin.SenderUser.ID != 5550001 {
+					t.Fatalf("origin = %+v", r.Origin)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var m Message
+			if err := json.Unmarshal([]byte(tt.input), &m); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			tt.check(t, m)
+		})
+	}
+}
+
+// Message has its own UnmarshalJSON, so a field added to the struct has to
+// survive it in an update, in an edit and in a reply nested inside either.
+func TestAlbumAndReplyFieldsSurviveMessageUnmarshalJSON(t *testing.T) {
+	const reply = `{"message_id":720,"from":` + sampleBot + `,"chat":` + sampleSupergroup + `,"date":1760000600,"media_group_id":"888","has_media_spoiler":true,` +
+		`"live_photo":{"file_id":"BAACn","file_unique_id":"AQADn","width":960,"height":1280,"duration":3}}`
+	const message = `{"message_id":721,"from":` + sampleUser + `,"chat":` + sampleSupergroup + `,"date":1760000610,"media_group_id":"999","has_media_spoiler":true,` +
+		`"external_reply":{"origin":{"type":"chat","sender_chat":` + sampleSupergroup + `,"date":1760000000},"photo":[{"file_id":"AgACe","file_unique_id":"AQADe","width":10,"height":10}]},` +
+		`"reply_to_message":` + reply + `}`
+
+	check := func(t *testing.T, name string, m *Message) {
+		t.Helper()
+		if m == nil {
+			t.Fatalf("%s: message was dropped", name)
+		}
+		if m.MediaGroupID != "999" || !m.HasMediaSpoiler {
+			t.Errorf("%s: media_group_id = %q, has_media_spoiler = %v", name, m.MediaGroupID, m.HasMediaSpoiler)
+		}
+		if m.ExternalReply == nil || m.ExternalReply.Origin.Type != OriginChat || m.ExternalReply.Origin.SenderChat == nil ||
+			len(m.ExternalReply.Photo) != 1 {
+			t.Errorf("%s: external_reply = %+v", name, m.ExternalReply)
+		}
+		n := m.ReplyToMessage
+		if n == nil || n.LivePhoto == nil || n.LivePhoto.FileID != "BAACn" || n.MediaGroupID != "888" || !n.HasMediaSpoiler {
+			t.Errorf("%s: nested reply = %+v", name, n)
+		}
+		var arrived map[string]json.RawMessage
+		if err := json.Unmarshal(m.Raw, &arrived); err != nil {
+			t.Fatalf("%s: Raw is not JSON: %v", name, err)
+		}
+		for _, key := range []string{"media_group_id", "has_media_spoiler", "external_reply"} {
+			if _, ok := arrived[key]; !ok {
+				t.Errorf("%s: Raw lost %q", name, key)
+			}
+		}
+	}
+
+	var direct Message
+	if err := json.Unmarshal([]byte(message), &direct); err != nil {
+		t.Fatalf("decode Message: %v", err)
+	}
+	check(t, "message", &direct)
+	for _, kind := range []string{"message", "edited_message"} {
+		var u Update
+		if err := json.Unmarshal([]byte(`{"update_id":1,"`+kind+`":`+message+`}`), &u); err != nil {
+			t.Fatalf("decode Update %s: %v", kind, err)
+		}
+		if kind == "message" {
+			check(t, "update.message", u.Message)
+		} else {
+			check(t, "update.edited_message", u.EditedMessage)
+		}
+	}
+}
+
+func TestAlbumAndReplyTypesMarshalLikeTheirBotAPIShape(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{
+			"live photo", LivePhoto{FileID: "f", FileUniqueID: "u"},
+			`{"file_id":"f","file_unique_id":"u","width":0,"height":0,"duration":0}`,
+		},
+		{
+			"hidden user origin", MessageOrigin{Type: OriginHiddenUser, Date: 5, SenderUserName: "Bob"},
+			`{"type":"hidden_user","date":5,"sender_user_name":"Bob"}`,
+		},
+		{
+			"external reply with only an origin", ExternalReplyInfo{Origin: MessageOrigin{Type: OriginUser, Date: 1}},
+			`{"origin":{"type":"user","date":1}}`,
+		},
+		{
+			"message without the new fields", Message{MessageID: 1, Date: 2, Chat: Chat{ID: 3, Type: "private"}},
+			`{"message_id":1,"chat":{"id":3,"type":"private"},"date":2}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tt.want {
+				t.Fatalf("marshaled\n got %s\nwant %s", raw, tt.want)
+			}
+		})
+	}
+}

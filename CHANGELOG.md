@@ -13,6 +13,20 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Added
+
+- **Albums, live photos and replies from other chats are decoded.** `Message`
+  gained `MediaGroupID`, `LivePhoto`, `ExternalReply` and `HasMediaSpoiler`, with
+  the types behind them: `LivePhoto`, `ExternalReplyInfo`, `MessageOrigin` and
+  the `Origin*` constants. Telegram sends every item of an album as its own
+  update, and `MediaGroupID` is what ties them together. A live photo fills
+  `Photo` as well as `LivePhoto`, so a bot that sorts attachments checks
+  `LivePhoto` first, as it does with `Animation` before `Document`. A reply to a
+  message in another chat or another topic arrives in `ExternalReply`, not in
+  `ReplyToMessage`. `ExternalReplyInfo` models the attachments and the origin;
+  the rest of the object is in `Message.Raw`. The Bot API version stays at 10.3:
+  live photos are from 10.0.
+
 ## v0.1.1-alpha.1 - 2026-10-22
 
 ### Added

@@ -106,6 +106,22 @@ type Photo struct {
 	FileSize     int64  `json:"file_size,omitempty"`
 }
 
+// LivePhoto is a photo with a short video (Bot API 10.0). FileID is the video;
+// Photo holds the sizes of the still frame. Telegram also fills
+// [Message.Photo] with those sizes, so a bot that sorts attachments checks
+// [Message.LivePhoto] before [Message.Photo], or it will take every live photo
+// for a plain one.
+type LivePhoto struct {
+	Photo        []Photo `json:"photo,omitempty"`
+	FileID       string  `json:"file_id"`
+	FileUniqueID string  `json:"file_unique_id"`
+	Width        int     `json:"width"`
+	Height       int     `json:"height"`
+	Duration     int     `json:"duration"`
+	MimeType     string  `json:"mime_type,omitempty"`
+	FileSize     int64   `json:"file_size,omitempty"`
+}
+
 // File is a getFile result. FilePath is relative on Telegram's own server and
 // absolute on a server started with --local; [Client.DownloadToFile] handles
 // both.
@@ -145,11 +161,34 @@ type Message struct {
 	Photo           []Photo         `json:"photo,omitempty"`
 	ReplyToMessage  *Message        `json:"reply_to_message,omitempty"`
 
+	// ExternalReply describes the message being replied to when it is in
+	// another chat or another topic. Such a reply arrives here and not in
+	// ReplyToMessage, which Telegram sets only for a reply in the same chat and
+	// thread, so a bot that reads the replied-to message looks at both.
+	ExternalReply *ExternalReplyInfo `json:"external_reply,omitempty"`
+
+	// MediaGroupID is shared by the messages of one album. Telegram delivers
+	// every item of an album as its own update and does not say how many there
+	// are or which one is last, so a bot that wants the whole album collects the
+	// items by this id. The caption is usually on one of them. The id is unique
+	// inside the chat only.
+	MediaGroupID string `json:"media_group_id,omitempty"`
+
+	// HasMediaSpoiler is true when the photo, video or animation is hidden under
+	// a spoiler.
+	HasMediaSpoiler bool `json:"has_media_spoiler,omitempty"`
+
 	// Animation arrives together with Document, which Telegram fills for a GIF
 	// as well for backward compatibility. A bot that sorts attachments must look
 	// at Animation before Document or it will take every GIF for a file.
 	Animation *Animation `json:"animation,omitempty"`
 	Sticker   *Sticker   `json:"sticker,omitempty"`
+
+	// LivePhoto arrives together with Photo, which Telegram fills with the sizes
+	// of the still frame for backward compatibility. A bot that sorts attachments
+	// must look at LivePhoto before Photo, as it does with Animation before
+	// Document.
+	LivePhoto *LivePhoto `json:"live_photo,omitempty"`
 
 	// MigrateToChatID and MigrateFromChatID are service messages for a group
 	// that became a supergroup under a new chat id: the first arrives in the old
@@ -187,6 +226,55 @@ type MessageEntity struct {
 	User          *User  `json:"user,omitempty"`
 	Language      string `json:"language,omitempty"`
 	CustomEmojiID string `json:"custom_emoji_id,omitempty"`
+}
+
+// MessageOrigin says where a message came from, flattened the way
+// [ReactionType] is: Type names which of the other fields is set. A "user"
+// origin sets SenderUser, a "hidden_user" one only SenderUserName, a "chat"
+// one SenderChat, and a "channel" one Chat and MessageID.
+type MessageOrigin struct {
+	Type            string `json:"type"`
+	Date            int64  `json:"date"`
+	SenderUser      *User  `json:"sender_user,omitempty"`
+	SenderUserName  string `json:"sender_user_name,omitempty"`
+	SenderChat      *Chat  `json:"sender_chat,omitempty"`
+	Chat            *Chat  `json:"chat,omitempty"`
+	MessageID       int64  `json:"message_id,omitempty"`
+	AuthorSignature string `json:"author_signature,omitempty"`
+}
+
+// Message origin kinds, as Telegram reports them in [MessageOrigin.Type].
+const (
+	OriginUser       = "user"
+	OriginHiddenUser = "hidden_user"
+	OriginChat       = "chat"
+	OriginChannel    = "channel"
+)
+
+// ExternalReplyInfo is the message a reply points at when that message is in
+// another chat or another topic. It has the attachments but no text and no
+// caption: Telegram does not send them. Of the rest of the Bot API object only
+// what the family reads is modeled; [Message.Raw] has everything that arrived.
+//
+// Like [Message], a photo of a live photo is in Photo as well as in LivePhoto,
+// and a GIF is in Document as well as in Animation.
+type ExternalReplyInfo struct {
+	Origin MessageOrigin `json:"origin"`
+	// Chat and MessageID are present only when the original chat is a
+	// supergroup or a channel.
+	Chat      *Chat      `json:"chat,omitempty"`
+	MessageID int64      `json:"message_id,omitempty"`
+	Animation *Animation `json:"animation,omitempty"`
+	Audio     *Audio     `json:"audio,omitempty"`
+	Document  *Document  `json:"document,omitempty"`
+	LivePhoto *LivePhoto `json:"live_photo,omitempty"`
+	Photo     []Photo    `json:"photo,omitempty"`
+	Sticker   *Sticker   `json:"sticker,omitempty"`
+	Video     *Video     `json:"video,omitempty"`
+	VideoNote *VideoNote `json:"video_note,omitempty"`
+	Voice     *Voice     `json:"voice,omitempty"`
+	// HasMediaSpoiler is true when the media was hidden under a spoiler.
+	HasMediaSpoiler bool `json:"has_media_spoiler,omitempty"`
 }
 
 type CallbackQuery struct {
