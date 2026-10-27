@@ -13,6 +13,8 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.1 - 2026-10-27
+
 ### Added
 
 - **Albums, live photos and replies from other chats are decoded.** `Message`
