@@ -770,3 +770,81 @@ func TestEditMessageMediaMessageRefusesMissingMediaBeforeSending(t *testing.T) {
 		t.Fatal("want a refusal for media with no file")
 	}
 }
+
+func TestEditMessageCaptionSendsHTMLPlacementAndKeyboard(t *testing.T) {
+	handler, method, body := capture(t, `{"ok":true,"result":{"message_id":7,"chat":{"id":42,"type":"private"},"date":1,`+
+		`"photo":[{"file_id":"AgACp","file_unique_id":"AQADp","width":10,"height":10}],"caption":"<b>$0.04</b> · 0:12","caption_entities":[{"type":"bold","offset":0,"length":5}]}}`)
+	c, _ := newTestClient(t, handler)
+
+	msg, err := c.EditMessageCaption(context.Background(), 42, 7, "<b>$0.04</b> · 0:12", EditCaptionOptions{
+		Markup:                &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "Stop", CallbackData: "stop"}}}},
+		ShowCaptionAboveMedia: true,
+	})
+	if err != nil {
+		t.Fatalf("EditMessageCaption: %v", err)
+	}
+	if *method != "editMessageCaption" {
+		t.Fatalf("method = %q", *method)
+	}
+	want := map[string]any{
+		"chat_id": float64(42), "message_id": float64(7), "caption": "<b>$0.04</b> · 0:12",
+		"parse_mode": "HTML", "show_caption_above_media": true,
+	}
+	for key, value := range want {
+		if (*body)[key] != value {
+			t.Errorf("%s = %v, want %v", key, (*body)[key], value)
+		}
+	}
+	raw, _ := json.Marshal((*body)["reply_markup"])
+	if !strings.Contains(string(raw), `"callback_data":"stop"`) {
+		t.Fatalf("reply_markup = %s", raw)
+	}
+	if msg.MessageID != 7 || msg.Caption != "<b>$0.04</b> · 0:12" || len(msg.Photo) != 1 || len(msg.CaptionEntities) != 1 {
+		t.Fatalf("message = %+v, want the edited message back", msg)
+	}
+}
+
+func TestEditMessageCaptionWithoutKeyboardOrPlacement(t *testing.T) {
+	handler, _, body := capture(t, `{"ok":true,"result":{"message_id":7}}`)
+	c, _ := newTestClient(t, handler)
+
+	if _, err := c.EditMessageCaption(context.Background(), 42, 7, "plain", EditCaptionOptions{}); err != nil {
+		t.Fatalf("EditMessageCaption: %v", err)
+	}
+	if (*body)["caption"] != "plain" || (*body)["parse_mode"] != "HTML" {
+		t.Fatalf("body = %v", *body)
+	}
+	for _, absent := range []string{"reply_markup", "show_caption_above_media"} {
+		if _, has := (*body)[absent]; has {
+			t.Fatalf("%s must be absent when it was not asked for", absent)
+		}
+	}
+}
+
+// An empty caption is how a caption is removed, so it has to be sent.
+func TestEditMessageCaptionSendsAnEmptyCaptionToRemoveIt(t *testing.T) {
+	handler, _, body := capture(t, `{"ok":true,"result":{"message_id":7}}`)
+	c, _ := newTestClient(t, handler)
+
+	if _, err := c.EditMessageCaption(context.Background(), 42, 7, "", EditCaptionOptions{}); err != nil {
+		t.Fatalf("EditMessageCaption: %v", err)
+	}
+	caption, has := (*body)["caption"]
+	if !has || caption != "" {
+		t.Fatalf("caption = %v (present %v), want an empty string on the wire", caption, has)
+	}
+	if _, has := (*body)["parse_mode"]; has {
+		t.Fatal("parse_mode has nothing to parse without a caption")
+	}
+}
+
+func TestEditMessageCaptionReportsNotModifiedAsTheError(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"}`))
+	})
+	msg, err := c.EditMessageCaption(context.Background(), 1, 2, "same", EditCaptionOptions{})
+	if !IsMessageNotModified(err) || msg.MessageID != 0 {
+		t.Fatalf("message = %+v, err = %v, want the not-modified error and no message", msg, err)
+	}
+}

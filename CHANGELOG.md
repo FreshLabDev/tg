@@ -56,6 +56,13 @@ Use this section for changes that are merged but not released yet.
   and `InputMediaAnimation` take `ShowCaptionAboveMedia` and `HasSpoiler`, in an
   edit and in an album. The caption was already HTML, so a caption and its
   placement go in the same call as the media.
+- **`EditMessageCaption`.** Replaces the caption of a message the bot sent and
+  returns the edited `Message`: an HTML caption, `EditCaptionOptions` with the
+  keyboard and `ShowCaptionAboveMedia`. An empty caption removes it, and is sent
+  as an empty string. Like `EditMessageMediaMessage` it returns "message is not
+  modified" as the error, which a bot editing on a timer ignores with
+  `IsMessageNotModified`. `editMessageCaption` was already in `probeSafe`, and
+  the server answers an empty body with "Message identifier is not specified".
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

@@ -521,6 +521,54 @@ func (c *Client) editMessageMedia(ctx context.Context, chatID, messageID int64, 
 	return c.submit(ctx, "editMessageMedia", fields, files, out)
 }
 
+// EditCaptionOptions are the parameters of [Client.EditMessageCaption] besides
+// the caption itself.
+type EditCaptionOptions struct {
+	// Markup is the keyboard the message has after the edit. Telegram takes the
+	// edit's keyboard as the new one, so a message that should keep its buttons
+	// gets them again here; nil sends none.
+	Markup *InlineKeyboardMarkup
+	// ShowCaptionAboveMedia is the placement after the edit, not a change to it:
+	// false puts the caption under the media, also when it was above before. It
+	// applies to animations, photos and videos.
+	ShowCaptionAboveMedia bool
+}
+
+// EditMessageCaption replaces the caption of a message the bot sent and
+// returns the edited message. The caption is HTML, like every other text this
+// package sends, and an empty one removes the caption. It is how a preview
+// shows a price or an elapsed time without touching its media.
+//
+// A "message is not modified" answer is returned as the error, as it is by
+// [Client.EditMessageMediaMessage]: there is no message to return. A bot that
+// repeats an edit on a timer ignores it with [IsMessageNotModified].
+//
+// Editing an inline message returns true instead of a message, so it is not
+// supported here: the call needs a chat and a message id.
+func (c *Client) EditMessageCaption(ctx context.Context, chatID, messageID int64, caption string, opts EditCaptionOptions) (Message, error) {
+	req := map[string]any{"chat_id": chatID, "message_id": messageID, "caption": caption}
+	if caption != "" {
+		req["parse_mode"] = "HTML"
+	}
+	if opts.ShowCaptionAboveMedia {
+		req["show_caption_above_media"] = true
+	}
+	if opts.Markup != nil {
+		req["reply_markup"] = opts.Markup
+	}
+	var resp struct {
+		OK     bool    `json:"ok"`
+		Result Message `json:"result"`
+	}
+	if err := c.post(ctx, "editMessageCaption", req, &resp); err != nil {
+		return Message{}, err
+	}
+	if !resp.OK {
+		return Message{}, okFalse("editMessageCaption")
+	}
+	return resp.Result, nil
+}
+
 // EditMessageReplyMarkup changes only a message's buttons. It is what removes
 // an action that has become unsafe or already ran, without disturbing the
 // content the user is looking at.

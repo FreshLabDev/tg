@@ -391,8 +391,9 @@ func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
 // require. Each one is in probeSafe because Telegram's server reads its
 // mandatory parameter first and answers with a parameter error before it does
 // anything: sendAnimation without a file ("There is no animation in the
-// request"), the others without a chat ("chat_id is empty") or message ids.
-var framyProbeMethods = []string{"sendAnimation"}
+// request"), editMessageCaption without a message ("Message identifier is not
+// specified"), the others without a chat ("chat_id is empty") or message ids.
+var framyProbeMethods = []string{"editMessageCaption", "sendAnimation"}
 
 func TestPreflightCanRequireTheMethodsAddedForFramy(t *testing.T) {
 	var bodies []string
