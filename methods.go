@@ -4,6 +4,7 @@ package tg
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 	"time"
@@ -199,6 +200,105 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) err
 	}
 	if !resp.OK {
 		return okFalse("deleteMessage")
+	}
+	return nil
+}
+
+// maxDeleteMessages is how many messages one deleteMessages call takes.
+const maxDeleteMessages = 100
+
+// DeleteMessages deletes several messages of one chat in a single call. Ids
+// that Telegram cannot find are skipped, not reported, so a nil error does not
+// say every message is gone. It takes 1 to 100 ids and refuses anything else
+// before sending; a bot with more splits them. The limits on which messages can
+// be deleted are those of [Client.DeleteMessage].
+func (c *Client) DeleteMessages(ctx context.Context, chatID int64, messageIDs []int64) error {
+	if len(messageIDs) == 0 {
+		return fmt.Errorf("deleteMessages requires at least one message id")
+	}
+	if len(messageIDs) > maxDeleteMessages {
+		return fmt.Errorf("deleteMessages takes at most %d message ids, got %d", maxDeleteMessages, len(messageIDs))
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.post(ctx, "deleteMessages", map[string]any{
+		"chat_id":     chatID,
+		"message_ids": messageIDs,
+	}, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return okFalse("deleteMessages")
+	}
+	return nil
+}
+
+// SetMessageReaction sets the bot's own reaction on a message, replacing the one
+// it set before, and an empty list removes it. A bot can have one reaction per
+// message.
+//
+// Telegram takes only the emoji in the list under ReactionTypeEmoji in the Bot
+// API reference. 👀 is in it and ✅ is not, so a bot that wants a "done" mark
+// picks another, such as 👌 or 🔥. A custom emoji works only if it is already on
+// the message or the chat's administrators allow it, and a paid reaction is
+// refused for a bot. The chat can also restrict which reactions it offers.
+//
+// For a message in an album the reaction lands on the first message of the
+// album that has not been deleted, whichever id is passed.
+//
+// To remove somebody else's reaction see [Client.DeleteMessageReaction].
+func (c *Client) SetMessageReaction(ctx context.Context, chatID, messageID int64, reactions []ReactionType) error {
+	req := map[string]any{"chat_id": chatID, "message_id": messageID}
+	if len(reactions) > 0 {
+		req["reaction"] = reactions
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.post(ctx, "setMessageReaction", req, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return okFalse("setMessageReaction")
+	}
+	return nil
+}
+
+// ReactionActor names whose reaction [Client.DeleteMessageReaction] removes:
+// exactly one of UserID and ActorChatID, the two ways a reaction is attributed.
+// They are the same two values a [MessageReactionUpdated] update carries, as
+// User.ID and ActorChat.ID.
+type ReactionActor struct {
+	UserID      int64
+	ActorChatID int64
+}
+
+// DeleteMessageReaction removes the reaction a user, or a chat acting as one,
+// put on a message. It is a moderation method (Bot API 10.0) and not the way to
+// take back the bot's own reaction, which [Client.SetMessageReaction] does with
+// an empty list. It works in groups and supergroups only, and the bot needs the
+// administrator right to delete messages there.
+func (c *Client) DeleteMessageReaction(ctx context.Context, chatID, messageID int64, actor ReactionActor) error {
+	req := map[string]any{"chat_id": chatID, "message_id": messageID}
+	switch {
+	case actor.UserID != 0 && actor.ActorChatID != 0:
+		return fmt.Errorf("deleteMessageReaction takes a user or a chat, not both")
+	case actor.UserID != 0:
+		req["user_id"] = actor.UserID
+	case actor.ActorChatID != 0:
+		req["actor_chat_id"] = actor.ActorChatID
+	default:
+		return fmt.Errorf("deleteMessageReaction requires the user or the chat whose reaction to remove")
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.post(ctx, "deleteMessageReaction", req, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return okFalse("deleteMessageReaction")
 	}
 	return nil
 }

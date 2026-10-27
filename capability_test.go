@@ -392,8 +392,11 @@ func TestMethodsThisPackageSendsAreProbeSafe(t *testing.T) {
 // mandatory parameter first and answers with a parameter error before it does
 // anything: sendAnimation without a file ("There is no animation in the
 // request"), editMessageCaption without a message ("Message identifier is not
-// specified"), the others without a chat ("chat_id is empty") or message ids.
-var framyProbeMethods = []string{"editMessageCaption", "sendAnimation"}
+// specified"), deleteMessages without ids ("Message identifiers are not
+// specified"), the reactions without a chat ("chat_id is empty").
+var framyProbeMethods = []string{
+	"deleteMessageReaction", "deleteMessages", "editMessageCaption", "sendAnimation", "setMessageReaction",
+}
 
 func TestPreflightCanRequireTheMethodsAddedForFramy(t *testing.T) {
 	var bodies []string

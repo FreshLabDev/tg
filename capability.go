@@ -33,13 +33,17 @@ import (
 // has been read to confirm that it validates before it acts. A method with no
 // required parameter never qualifies: on an empty body setMyDescription clears
 // the description and setChatMenuButton resets the menu button. sendAnimation,
-// for one, answers "There is no animation in the request" before anything else.
+// for one, answers "There is no animation in the request" before anything else,
+// deleteMessages "Message identifiers are not specified", and
+// setMessageReaction and deleteMessageReaction "chat_id is empty".
 var probeSafe = map[string]bool{
 	"answerCallbackQuery":      true,
 	"answerInlineQuery":        true,
 	"copyMessage":              true,
 	"deleteEphemeralMessage":   true,
 	"deleteMessage":            true,
+	"deleteMessageReaction":    true,
+	"deleteMessages":           true,
 	"editEphemeralMessageText": true,
 	"editMessageCaption":       true,
 	"editMessageMedia":         true,

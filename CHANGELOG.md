@@ -63,6 +63,20 @@ Use this section for changes that are merged but not released yet.
   modified" as the error, which a bot editing on a timer ignores with
   `IsMessageNotModified`. `editMessageCaption` was already in `probeSafe`, and
   the server answers an empty body with "Message identifier is not specified".
+- **Reactions and batch delete.** `SetMessageReaction` sets the bot's own
+  reaction and replaces the previous one; an empty list removes it.
+  `DeleteMessages` deletes 1 to 100 messages in one call and refuses any other
+  count before sending. `DeleteMessageReaction` (Bot API 10.0) takes a
+  `ReactionActor`, a user or a chat, and removes that actor's reaction. It is a
+  moderation method for groups and supergroups and needs the right to delete
+  messages: it cannot take back the bot's own reaction, so the bot does that
+  with `SetMessageReaction` and no reactions. Telegram accepts only the emoji in
+  the Bot API reference list for a bot's reaction, and the check mark is not in
+  it, so a "done" mark has to be another emoji. `setMessageReaction` was already
+  in `probeSafe`; `deleteMessages` and `deleteMessageReaction` join it, so
+  `Needs.Methods` can name all three. The server source answers an empty body
+  with "Message identifiers are not specified" and "chat_id is empty" before it
+  calls TDLib.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 
