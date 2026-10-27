@@ -55,7 +55,12 @@ func TestProbeRefusesMethodsThatCouldExecute(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 
-	for _, method := range []string{"logOut", "getMe", "deleteWebhook", "close"} {
+	// setMyDescription and setMyShortDescription clear the description on an empty
+	// body, and setChatMenuButton resets the menu button to the default.
+	for _, method := range []string{
+		"logOut", "getMe", "deleteWebhook", "close",
+		"setMyDescription", "setMyShortDescription", "setChatMenuButton",
+	} {
 		if _, err := c.Probe(context.Background(), method); err == nil {
 			t.Fatalf("Probe(%q) must be refused", method)
 		}

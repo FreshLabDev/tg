@@ -77,6 +77,17 @@ Use this section for changes that are merged but not released yet.
   `Needs.Methods` can name all three. The server source answers an empty body
   with "Message identifiers are not specified" and "chat_id is empty" before it
   calls TDLib.
+- **Menu button and profile texts.** `SetChatMenuButton` takes a `MenuButton`
+  (`MenuCommands`, `MenuWebApp` with `Text` and `WebApp`, or `MenuDefault`) and a
+  private chat; chat 0 sets the default for every private chat. A web_app button
+  without its text or URL and an unknown kind are refused before sending.
+  `SetMyDescription` and `SetMyShortDescription` take the text and a language
+  code, empty for the default. An empty text is sent as an empty string, because
+  that is how Telegram is told to drop the text of a language. maply and framy
+  both set these at start; maply did it through `Call`. None of the three is in
+  `probeSafe`, and a test now says so: with an empty body `setMyDescription` and
+  `setMyShortDescription` clear the text, and `setChatMenuButton` resets the
+  button.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

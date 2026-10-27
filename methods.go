@@ -372,6 +372,77 @@ func (c *Client) GetChatMember(ctx context.Context, chatID, userID int64) (ChatM
 	return resp.Result, nil
 }
 
+// SetChatMenuButton changes the menu button in a private chat with the bot, or
+// the bot's default button when chatID is 0. A chat's own button wins over the
+// default, and [MenuDefault] removes the chat's own.
+//
+// A web_app button needs both Text and WebApp.URL, and an unknown Type is not a
+// button at all; both are refused before sending. An empty Type is sent as
+// [MenuDefault].
+func (c *Client) SetChatMenuButton(ctx context.Context, chatID int64, button MenuButton) error {
+	menu := map[string]any{"type": button.Type}
+	switch button.Type {
+	case "", MenuDefault:
+		menu["type"] = MenuDefault
+	case MenuCommands:
+	case MenuWebApp:
+		if button.Text == "" || button.WebApp == nil || button.WebApp.URL == "" {
+			return fmt.Errorf("a web_app menu button requires Text and WebApp.URL")
+		}
+		menu["text"] = button.Text
+		menu["web_app"] = button.WebApp
+	default:
+		return fmt.Errorf("unknown menu button type %q", button.Type)
+	}
+	req := map[string]any{"menu_button": menu}
+	if chatID != 0 {
+		req["chat_id"] = chatID
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.post(ctx, "setChatMenuButton", req, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return okFalse("setChatMenuButton")
+	}
+	return nil
+}
+
+// SetMyDescription sets the text shown in an empty chat with the bot, up to 512
+// characters. languageCode is a two-letter ISO 639-1 code for the users it is
+// shown to; empty sets the text for every user who has no description of their
+// own language. An empty description is sent, not left out: it removes the
+// description for that language.
+func (c *Client) SetMyDescription(ctx context.Context, description, languageCode string) error {
+	return c.setBotText(ctx, "setMyDescription", "description", description, languageCode)
+}
+
+// SetMyShortDescription sets the text on the bot's profile page, which is sent
+// with the link when someone shares the bot, up to 120 characters. languageCode
+// and an empty text work as for [Client.SetMyDescription].
+func (c *Client) SetMyShortDescription(ctx context.Context, shortDescription, languageCode string) error {
+	return c.setBotText(ctx, "setMyShortDescription", "short_description", shortDescription, languageCode)
+}
+
+func (c *Client) setBotText(ctx context.Context, method, field, text, languageCode string) error {
+	req := map[string]any{field: text}
+	if languageCode != "" {
+		req["language_code"] = languageCode
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	if err := c.post(ctx, method, req, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return okFalse(method)
+	}
+	return nil
+}
+
 // LogOut releases the token from the current Bot API server so it can be used
 // on another one. Telegram refuses to log back in to the cloud server for ten
 // minutes afterwards, so this is only ever called deliberately — and never by

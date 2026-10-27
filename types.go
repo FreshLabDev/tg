@@ -482,6 +482,32 @@ type CopyTextButton struct {
 	Text string `json:"text"`
 }
 
+// MenuButton is the button next to the input field in a private chat with the
+// bot. Like [ReactionType] it is flattened: Type says which of the other fields
+// is used. Text and WebApp belong to MenuWebApp only.
+type MenuButton struct {
+	// Type is MenuCommands, MenuWebApp or MenuDefault. An empty one means
+	// MenuDefault, which is also what Telegram assumes when none is given.
+	Type string `json:"type"`
+	// Text is the label of a MenuWebApp button.
+	Text string `json:"text,omitempty"`
+	// WebApp is the Mini App a MenuWebApp button opens. A t.me link to a Mini App
+	// of the bot can stand in for the URL; Telegram then opens it as if the user
+	// had followed the link.
+	WebApp *WebAppInfo `json:"web_app,omitempty"`
+}
+
+// Menu button kinds, as Telegram names them in [MenuButton.Type].
+const (
+	// MenuCommands opens the list of the bot's commands, which is what a bot has
+	// until it sets another.
+	MenuCommands = "commands"
+	// MenuWebApp opens a Mini App.
+	MenuWebApp = "web_app"
+	// MenuDefault removes a chat's own button, so the bot's default applies.
+	MenuDefault = "default"
+)
+
 // DisabledButton is an empty Bot API 10.3 object: the presence of the field is
 // what disables the button.
 type DisabledButton struct{}
