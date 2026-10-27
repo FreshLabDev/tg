@@ -27,17 +27,28 @@ type Client struct {
 	allowed   []string
 }
 
-// Event describes one HTTP attempt against the Bot API. It carries no bot
-// token and no response body, so it is safe to log or turn into metrics.
+// Event describes one HTTP attempt against the Bot API, or one file download.
+// It carries no bot token and no response body, so it is safe to log or turn
+// into metrics.
 type Event struct {
-	// Method is the Bot API method name, e.g. "sendMessage".
+	// Method is the Bot API method name, e.g. "sendMessage". For a download by
+	// [Client.DownloadToFile] it is "downloadFile" when the file came over HTTP
+	// and "readLocalFile" when it was read from the disk of a --local server.
 	Method string
 	// Status is the HTTP status, or 0 when the request never got a response.
+	// A "readLocalFile" event has no request, so its Status is always 0, and a
+	// success is told by Err being nil.
 	Status int
-	// Duration covers the request and reading the response body.
+	// Duration covers the request and reading the response body. For a download
+	// it covers the whole transfer to the destination file.
 	Duration time.Duration
-	// Attempt counts from 1.
+	// Attempt counts from 1. A download is one attempt: it is not retried.
 	Attempt int
+	// Bytes is how much a download wrote to its destination file, including the
+	// part of a file that was then removed because the download failed or went
+	// over the limit. It is 0 for every other event, and for a download that never
+	// got as far as writing.
+	Bytes int64
 	// Retryable reports whether this failure is of a kind this package retries
 	// -- a transport failure, a 429, a 5xx. It does not promise another attempt
 	// followed: the retry budget may already be spent, and a POST is replayed
@@ -52,8 +63,9 @@ type Event struct {
 	Probe bool
 }
 
-// Observer is called once per HTTP attempt. It must not block: it runs on the
-// calling goroutine, inside the request path.
+// Observer is called once per HTTP attempt, and once per file download made by
+// [Client.DownloadToFile]. It must not block: it runs on the calling goroutine,
+// inside the request path.
 type Observer func(Event)
 
 // Option configures a Client.

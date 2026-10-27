@@ -88,6 +88,18 @@ Use this section for changes that are merged but not released yet.
   `probeSafe`, and a test now says so: with an empty body `setMyDescription` and
   `setMyShortDescription` clear the text, and `setChatMenuButton` resets the
   button.
+- **Downloads reach the `Observer`.** `DownloadToFile` reports one `Event` when
+  it finishes, successful or not. `Method` is `downloadFile` for a transfer over
+  HTTP and `readLocalFile` for a read from the disk of a `--local` server. The
+  second has no request, so its `Status` is 0 and a success is told by `Err`
+  being nil. `Duration` covers the whole transfer, and the new `Event.Bytes` is
+  what was written to the destination, 0 for every other event. `Retryable` says
+  whether another try could pass (the network, a 429, a 5xx), but a download is
+  still one attempt and `Attempt` is 1. A file over the limit is not retryable,
+  and `Bytes` counts what was written before it was rejected. `Err` is the error
+  `DownloadToFile` returns, so it holds no token. A bot that counts every event
+  by `Method` gets two new values, and one that treats `Status == 0` as "no
+  answer" has to check `Err` first for `readLocalFile`.
 
 ## v0.1.1-alpha.1 - 2026-10-22
 

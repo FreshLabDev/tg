@@ -247,6 +247,26 @@ func (c *Client) emit(ctx context.Context, method string, status int, d time.Dur
 	})
 }
 
+// emitDownload reports a finished download. It is the one place an Event is
+// built from something other than an HTTP attempt at a Bot API method, so it
+// takes only what the Event carries: no URL, no path, and no body, all of which
+// hold the token or the user's file. err is already redacted by the caller.
+func (c *Client) emitDownload(ctx context.Context, method string, status int, started time.Time, written int64, err error, retryable bool) {
+	if c.observe == nil {
+		return
+	}
+	c.observe(Event{
+		Method:    method,
+		Status:    status,
+		Duration:  time.Since(started),
+		Attempt:   1,
+		Retryable: err != nil && retryable,
+		Err:       err,
+		Probe:     isProbe(ctx),
+		Bytes:     written,
+	})
+}
+
 func (c *Client) endpoint(method string) string {
 	return strings.TrimRight(c.apiBase, "/") + "/bot" + c.token + "/" + method
 }

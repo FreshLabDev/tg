@@ -33,6 +33,14 @@ func (c *Client) GetFile(ctx context.Context, fileID string) (File, error) {
 	return resp.Result, nil
 }
 
+// Event methods for a download. Neither is a Bot API method: a download is the
+// file route, or a read from the disk of a --local server, and the observer
+// needs to tell the two apart because only the first crosses a network.
+const (
+	downloadMethod  = "downloadFile"
+	localReadMethod = "readLocalFile"
+)
+
 // DownloadToFile streams the media behind a getFile result into dst. Nothing
 // is buffered in memory: a single file can be hundreds of megabytes and
 // several downloads can run at once.
@@ -43,59 +51,96 @@ func (c *Client) GetFile(ctx context.Context, fileID string) (File, error) {
 // over HTTP at all — its /file/bot<token>/… route answers 404 — so that case
 // reads from disk and fails loudly when the directory is not mounted, instead
 // of pretending a download could work.
+//
+// Every download reports one [Event] to the [Observer], successful or not, once
+// it has finished: Method is "downloadFile" for the HTTP route and
+// "readLocalFile" for a read from disk, Duration covers the whole transfer, and
+// Bytes is how much was written to dst. See [Event] for what the fields mean
+// here. A limit that is not positive is refused before anything starts and
+// reports nothing.
 func (c *Client) DownloadToFile(ctx context.Context, filePath, dst string, maxBytes int64) error {
 	if maxBytes <= 0 {
 		return fmt.Errorf("download limit must be positive")
 	}
+	started := time.Now()
 	if strings.HasPrefix(filePath, "/") {
-		return c.copyLocalFile(filePath, dst, maxBytes)
+		written, err := c.copyLocalFile(filePath, dst, maxBytes)
+		// Nothing about a file on disk gets better by asking again.
+		c.emitDownload(ctx, localReadMethod, 0, started, written, err, false)
+		return err
 	}
+	status, written, err := c.downloadHTTP(ctx, filePath, dst, maxBytes)
+	c.emitDownload(ctx, downloadMethod, status, started, written, err, downloadRetryable(err))
+	return err
+}
+
+// downloadHTTP fetches filePath from the server's file route. It reports the
+// HTTP status, 0 when no answer came, and the bytes written to dst.
+func (c *Client) downloadHTTP(ctx context.Context, filePath, dst string, maxBytes int64) (int, int64, error) {
 	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 	rawURL := strings.TrimRight(c.apiBase, "/") + "/file/bot" + c.token + "/" + strings.TrimPrefix(filePath, "/")
 	req, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return c.redactError(err)
+		return 0, 0, c.redactError(err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return c.redactError(err)
+		return 0, 0, c.redactError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.redactAPI(parseAPIError("downloadFile", resp.StatusCode, resp.Body))
+		return resp.StatusCode, 0, c.redactAPI(parseAPIError(downloadMethod, resp.StatusCode, resp.Body))
 	}
-	return writeLimited(dst, resp.Body, maxBytes)
+	written, err := writeLimited(dst, resp.Body, maxBytes)
+	return resp.StatusCode, written, err
+}
+
+// downloadRetryable says whether a failed download is of a kind that could pass
+// on another try: the network, a 429, a 5xx. This package never retries one;
+// the answer is for the observer. A file over the limit, a file missing on disk
+// and a target that cannot be written fail the same way next time.
+func downloadRetryable(err error) bool {
+	if err == nil || errors.Is(err, ErrFileTooLarge) {
+		return false
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return false
+	}
+	return retryableError(err)
 }
 
 // copyLocalFile copies a file produced by a --local server whose data
 // directory is mounted here, then removes the original: a local server keeps
-// every file it ever produced and never reclaims the space.
-func (c *Client) copyLocalFile(path, dst string, maxBytes int64) error {
+// every file it ever produced and never reclaims the space. It reports the bytes
+// written to dst.
+func (c *Client) copyLocalFile(path, dst string, maxBytes int64) (int64, error) {
 	if c.filesRoot == "" {
-		return fmt.Errorf("bot api server returned an absolute file path %q: it runs with --local and serves no files over HTTP, so its data directory must be mounted and WithLocalFiles set", c.redact(path))
+		return 0, fmt.Errorf("bot api server returned an absolute file path %q: it runs with --local and serves no files over HTTP, so its data directory must be mounted and WithLocalFiles set", c.redact(path))
 	}
 	clean, err := c.resolveUnderBotDir(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	info, err := os.Stat(clean)
 	if err != nil {
-		return fmt.Errorf("local bot api file unavailable: %w", c.redactPathError(err))
+		return 0, fmt.Errorf("local bot api file unavailable: %w", c.redactPathError(err))
 	}
 	if info.Size() > maxBytes {
-		return fmt.Errorf("%w: %d bytes", ErrFileTooLarge, info.Size())
+		return 0, fmt.Errorf("%w: %d bytes", ErrFileTooLarge, info.Size())
 	}
 	in, err := os.Open(clean)
 	if err != nil {
-		return fmt.Errorf("open local bot api file: %w", c.redactPathError(err))
+		return 0, fmt.Errorf("open local bot api file: %w", c.redactPathError(err))
 	}
 	defer in.Close()
-	if err := writeLimited(dst, in, maxBytes); err != nil {
-		return err
+	written, err := writeLimited(dst, in, maxBytes)
+	if err != nil {
+		return written, err
 	}
 	_ = os.Remove(clean)
-	return nil
+	return written, nil
 }
 
 // resolveUnderBotDir turns a path the server handed over into a real path
@@ -173,11 +218,13 @@ func (c *Client) redact(s string) string {
 // writeLimited copies at most maxBytes into dst and fails if the source has
 // more, so an oversize file is rejected without ever being held whole. A
 // failure removes dst: os.Create truncates before the size is known, and a
-// caller that finds a file where an error was reported will process it.
-func writeLimited(dst string, src io.Reader, maxBytes int64) (err error) {
+// caller that finds a file where an error was reported will process it. It
+// returns how many bytes were written, including those of a file that was then
+// removed.
+func writeLimited(dst string, src io.Reader, maxBytes int64) (written int64, err error) {
 	out, err := os.Create(dst)
 	if err != nil {
-		return fmt.Errorf("create download target: %w", err)
+		return 0, fmt.Errorf("create download target: %w", err)
 	}
 	defer func() {
 		closeErr := out.Close()
@@ -188,12 +235,13 @@ func writeLimited(dst string, src io.Reader, maxBytes int64) (err error) {
 			_ = os.Remove(dst)
 		}
 	}()
-	written, err := io.Copy(out, io.LimitReader(src, maxBytes+1))
+	copied, err := io.Copy(out, io.LimitReader(src, maxBytes+1))
+	written = copied
 	if err != nil {
-		return fmt.Errorf("write download: %w", err)
+		return written, fmt.Errorf("write download: %w", err)
 	}
 	if written > maxBytes {
-		return fmt.Errorf("%w: more than %d bytes", ErrFileTooLarge, maxBytes)
+		return written, fmt.Errorf("%w: more than %d bytes", ErrFileTooLarge, maxBytes)
 	}
-	return out.Sync()
+	return written, out.Sync()
 }
