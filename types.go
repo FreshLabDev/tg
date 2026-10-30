@@ -190,6 +190,15 @@ type Message struct {
 	// Document.
 	LivePhoto *LivePhoto `json:"live_photo,omitempty"`
 
+	// GuestQueryID is set on a [Update.GuestMessage]: the query
+	// [Client.AnswerGuestQuery] answers. Its Chat is where the bot was
+	// summoned, and the bot is not in it, so nothing else may be sent there.
+	GuestQueryID string `json:"guest_query_id,omitempty"`
+	// GuestBotCallerUser and GuestBotCallerChat are set on a message a guest
+	// bot sent: who summoned it, a person or a chat posting as itself.
+	GuestBotCallerUser *User `json:"guest_bot_caller_user,omitempty"`
+	GuestBotCallerChat *Chat `json:"guest_bot_caller_chat,omitempty"`
+
 	// MigrateToChatID and MigrateFromChatID are service messages for a group
 	// that became a supergroup under a new chat id: the first arrives in the old
 	// group, the second in the new supergroup.
@@ -385,6 +394,14 @@ type Update struct {
 
 	// StoppedMessageGeneration is a press of Stop on a draft (Bot API 10.3).
 	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
+
+	// GuestMessage summons the bot into a chat it is not a member of (Bot API
+	// 10.0): a mention of it, or a reply to its message. The message carries
+	// GuestQueryID, which [Client.AnswerGuestQuery] answers once, and the
+	// message it replied to, if any. It arrives only to a bot with Guest Mode
+	// on in BotFather, and only when "guest_message" is named in
+	// [WithAllowedUpdates] if the bot names any.
+	GuestMessage *Message `json:"guest_message,omitempty"`
 }
 
 // LinkPreviewOptions controls Telegram's own preview of a link in a message.
@@ -543,4 +560,6 @@ type Me struct {
 	IsBot     bool   `json:"is_bot"`
 	FirstName string `json:"first_name"`
 	Username  string `json:"username,omitempty"`
+	// SupportsGuestQueries is true while Guest Mode is on in BotFather.
+	SupportsGuestQueries bool `json:"supports_guest_queries,omitempty"`
 }

@@ -27,6 +27,13 @@ Use this section for changes that are merged but not released yet.
   Telegram requires. An empty video `MimeType` is `video/mp4`.
   `InlineQueryResultPhoto` gained `PhotoWidth`, `PhotoHeight`,
   `ShowCaptionAboveMedia` and `InputMessageContent`.
+- **Guest mode.** `Update.GuestMessage` is the message that summoned the
+  bot into a chat it is not in, with `Message.GuestQueryID` and the message
+  it replied to. `AnswerGuestQuery` answers it once and returns the
+  `inline_message_id` the `EditInlineMessage` methods change it by.
+  `Message.GuestBotCallerUser` and `GuestBotCallerChat` say who summoned a
+  guest bot's message, and `Me.SupportsGuestQueries` whether Guest Mode is
+  on. framy answers `@framyin_bot` in reply to a photo this way.
 
 ## v0.2.0-alpha.3 - 2026-10-30
 
