@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package tg
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strconv"
+)
 
 // Rich messages (Bot API 10.1+) carry markup Telegram's classic parse_mode
 // cannot express and are not capped at 4096 characters. Exactly one of html,
@@ -132,4 +136,119 @@ func (c *Client) sendRichMessage(ctx context.Context, req map[string]any) (Messa
 		return Message{}, okFalse("sendRichMessage")
 	}
 	return resp.Result, nil
+}
+
+// RichMedia is a file a rich message's HTML shows by its ID:
+// <img src="tg://photo?id=card"/> shows the media whose ID is "card". The
+// file is a file_id, a URL or an upload, as in any InputMedia; Telegram reads
+// the file and its properties and ignores a caption.
+type RichMedia struct {
+	// ID is 1 to 64 characters of A-Z, a-z, 0-9, _ and -.
+	ID    string
+	Media InputMedia
+}
+
+// RichOptions are the parameters of [Client.SendRich] besides the HTML.
+type RichOptions struct {
+	// ThreadID posts into a forum topic; zero stays in the main thread.
+	ThreadID int
+	// ReplyTo answers a message; zero sends a standalone one.
+	ReplyTo int64
+	// ReplyToEphemeral answers an ephemeral message, which is what lets a bot
+	// that is not an administrator answer an ephemeral command privately.
+	ReplyToEphemeral int64
+	// Ephemeral shows the message to one member of a group.
+	Ephemeral *Ephemeral
+	Markup    *InlineKeyboardMarkup
+	// Media are the files the HTML names. An upload makes the request
+	// multipart; file_ids and URLs keep it JSON.
+	Media []RichMedia
+	Rich  []RichOption
+}
+
+// SendRich sends rich HTML with the media it shows, as a reply, into a topic
+// or to one member of a group, as opts say.
+func (c *Client) SendRich(ctx context.Context, chatID int64, html string, opts RichOptions) (Message, error) {
+	rich := richHTML(html, opts.Rich...)
+	var files []attachment
+	if err := c.attachRichMedia(&files, rich, opts.Media); err != nil {
+		return Message{}, err
+	}
+	req := mediaFields(chatID, CaptionOptions{
+		ThreadID: opts.ThreadID, ReplyTo: opts.ReplyTo, ReplyToEphemeral: opts.ReplyToEphemeral,
+		Ephemeral: opts.Ephemeral, Markup: opts.Markup,
+	})
+	req["rich_message"] = rich
+	var resp struct {
+		OK     bool    `json:"ok"`
+		Result Message `json:"result"`
+	}
+	if err := c.submit(ctx, "sendRichMessage", req, files, &resp); err != nil {
+		return Message{}, err
+	}
+	if !resp.OK {
+		return Message{}, okFalse("sendRichMessage")
+	}
+	return resp.Result, nil
+}
+
+// EditMessageRich replaces a message's content with rich HTML and the media
+// it shows, and its keyboard with markup; nil leaves none. A text or a rich
+// message takes it; a media message does not. "Message is not modified" is
+// success.
+func (c *Client) EditMessageRich(ctx context.Context, chatID, messageID int64, html string, media []RichMedia, markup *InlineKeyboardMarkup, opts ...RichOption) error {
+	rich := richHTML(html, opts...)
+	var files []attachment
+	if err := c.attachRichMedia(&files, rich, media); err != nil {
+		return err
+	}
+	req := map[string]any{"chat_id": chatID, "message_id": messageID, "rich_message": rich}
+	if markup != nil {
+		req["reply_markup"] = markup
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	err := c.submit(ctx, "editMessageText", req, files, &resp)
+	if IsMessageNotModified(err) {
+		return nil
+	}
+	if err == nil && !resp.OK {
+		return okFalse("editMessageText")
+	}
+	return err
+}
+
+// EditEphemeralMessageRich is [Client.EditMessageRich] for an ephemeral
+// message.
+func (c *Client) EditEphemeralMessageRich(ctx context.Context, chatID, receiverUserID, ephemeralMessageID int64, html string, media []RichMedia, markup *InlineKeyboardMarkup, opts ...RichOption) error {
+	rich := richHTML(html, opts...)
+	var files []attachment
+	if err := c.attachRichMedia(&files, rich, media); err != nil {
+		return err
+	}
+	return c.editEphemeralWith(ctx, "editEphemeralMessageText", chatID, receiverUserID, ephemeralMessageID, map[string]any{"rich_message": rich}, files, markup)
+}
+
+// attachRichMedia puts media into a rich payload: an upload becomes a part
+// of its own, named rich0, rich1 and so on, and the item says attach:// to it.
+func (c *Client) attachRichMedia(files *[]attachment, rich map[string]any, media []RichMedia) error {
+	if len(media) == 0 {
+		return nil
+	}
+	items := make([]map[string]any, 0, len(media))
+	for i, m := range media {
+		if m.ID == "" || m.Media == nil {
+			return fmt.Errorf("rich media %d needs an id and a file", i)
+		}
+		object, file := m.Media.item()
+		value, err := c.attachInner(files, "rich"+strconv.Itoa(i), file)
+		if err != nil {
+			return fmt.Errorf("rich media %q: %w", m.ID, err)
+		}
+		object["media"] = value
+		items = append(items, map[string]any{"id": m.ID, "media": object})
+	}
+	rich["media"] = items
+	return nil
 }

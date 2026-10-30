@@ -39,6 +39,16 @@ Use this section for changes that are merged but not released yet.
   not be in the text, as `SendTextWithPreview` sends one. An inline message
   can show a picture this way and still go back to plain text later, which
   a media message cannot.
+- **Rich messages with their own pictures.** `SendRich` sends a rich
+  message whose `<img src="tg://photo?id=…"/>` points at a `RichMedia` item:
+  a file_id, a URL or an upload, which goes as a multipart part of its own.
+  `RichOptions` carries the topic, the reply (to a message or to an
+  ephemeral one), the ephemeral receiver and the keyboard, as
+  `CaptionOptions` does for a photo. `EditMessageRich` and
+  `EditEphemeralMessageRich` replace the whole message with new HTML and new
+  pictures; "not modified" is success. A media item without an id is
+  refused before sending. framy draws its run preview this way: the card on
+  top, the models and settings in `<details>` below.
 
 ## v0.2.0-alpha.3 - 2026-10-30
 
