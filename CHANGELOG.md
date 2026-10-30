@@ -26,6 +26,37 @@ Use this section for changes that are merged but not released yet.
   video, animation, audio, document, ephemeral or not) can go silently,
   protected, or with an effect, without a new method. Text sends still have
   none; `docs/limitations.md` says so.
+- **Cached inline results and the results button.**
+  `InlineQueryResultCachedPhoto`, `InlineQueryResultCachedVideo` and
+  `InlineQueryResultCachedMpeg4Gif` send a file Telegram already has by its
+  file_id, so an inline answer of past results fetches nothing.
+  `InlineAnswer.Button` puts a button above the results that opens a Mini App
+  or sends `/start` with a parameter. A button Telegram would refuse, and a
+  cached video without the title Telegram requires, are refused before
+  anything is sent.
+- **Edits of an inline message.** `EditInlineMessageText`,
+  `EditInlineMessageMedia`, `EditInlineMessageCaption` and
+  `EditInlineMessageReplyMarkup` address a message sent through the bot by
+  its `inline_message_id`. "Not modified" is success for all four. Telegram
+  takes no upload in an inline edit, so `EditInlineMessageMedia` refuses one
+  before sending.
+- **Drafts with Stop.** `SendMessageDraft`, `SendRichDraftHTML` and
+  `SendRichDraftMarkdown` stream a draft into a private chat, with
+  `DraftOptions` for the topic, `CanStop` and `KeepOnStop` (Bot API 10.3). A
+  press of Stop arrives as `Update.StoppedMessageGeneration`
+  (`MessageGenerationStopped`: the chat, the topic and the draft id). A draft
+  id of zero is refused before sending.
+
+### Changed
+
+- **`CallbackQuery.Message` is a pointer**, and `CallbackQuery.InlineMessageID`
+  is new. A press on a button of an inline message has no message, and the
+  zero value read as chat 0; now `Message` is nil there and
+  `InlineMessageID` names the message. This breaks every bot that reads a
+  callback's message. The change in each one: `cq.Message.X` stays as it is
+  where the button is on the bot's own message, and a handler that can see
+  an inline message checks `cq.Message == nil` first; a value passed on as
+  `cq.Message` becomes `*cq.Message`.
 
 ## v0.2.0-alpha.2 - 2026-10-27
 

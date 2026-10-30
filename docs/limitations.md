@@ -22,16 +22,11 @@ reading the source.
 - **`BotCommandScope` carries only a type.** The `chat`,
   `chat_administrators` and `chat_member` scopes need a chat id and sometimes a
   user id, so per-group command lists are unreachable.
-- **`EditMessageText` cannot address an `inline_message_id`.** Inline-mode
-  editing is out of reach until the signature changes.
-- **`CallbackQuery.Message` is a value, not a pointer.** Telegram omits it for
-  a callback from an inline message, and a zero value there reads as chat 0
-  rather than as absence. Searchy does send inline messages, but only ever with
-  URL buttons, so no callback can arrive without a message today; a bot that
-  puts `callback_data` on an inline result has to make this a pointer first,
-  which every caller sees. Until then, `cq.Message.MessageID == 0` is the
-  check. A message the bot can no longer reach is a different case: it is
-  present, with `Date == 0` and only `Chat` and `MessageID` filled.
+- **An inline message's rich text cannot be edited.** `EditInlineMessageText`
+  sends HTML text; `rich_message` on an inline message goes through `Call`.
+- **`InlineAnswer.CacheTime` cannot ask for no cache.** Zero means Telegram's
+  default of 300 seconds, so the shortest cache a bot can ask for is one
+  second.
 
 ## Deliberate rigidity
 

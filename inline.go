@@ -78,6 +78,91 @@ func (r InlineQueryResultPhoto) MarshalJSON() ([]byte, error) {
 	}{Type: "photo", ParseMode: captionParseMode(r.Caption), result: result(r)})
 }
 
+// The cached results send a file Telegram already has, by its file_id: a
+// photo, a video or an MPEG-4 animation the bot sent or received before.
+// Nothing is fetched, so they never fail on an unreachable URL, and the
+// picker shows the file itself. A file_id is the bot's own: one another bot
+// got for the same file does not work here.
+
+// InlineQueryResultCachedPhoto sends a photo by its file_id.
+type InlineQueryResultCachedPhoto struct {
+	ID          string `json:"id"`
+	PhotoFileID string `json:"photo_file_id"`
+	// Title and Description appear in the picker only.
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Caption is HTML and appears on the sent message.
+	Caption               string `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool   `json:"show_caption_above_media,omitempty"`
+	// ReplyMarkup is the keyboard of the sent message. One with a callback
+	// button makes Telegram report the message's inline_message_id in
+	// [ChosenInlineResult], and its presses come with it.
+	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	// InputMessageContent sends that instead of the photo.
+	InputMessageContent InputMessageContent `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultCachedPhoto) inlineQueryResult() {}
+
+func (r InlineQueryResultCachedPhoto) MarshalJSON() ([]byte, error) {
+	type result InlineQueryResultCachedPhoto
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "photo", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
+// InlineQueryResultCachedVideo sends a video by its file_id. Telegram
+// requires its Title, so a card without one is refused before sending.
+type InlineQueryResultCachedVideo struct {
+	ID                    string                `json:"id"`
+	VideoFileID           string                `json:"video_file_id"`
+	Title                 string                `json:"title"`
+	Description           string                `json:"description,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent   InputMessageContent   `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultCachedVideo) inlineQueryResult() {}
+
+func (r InlineQueryResultCachedVideo) MarshalJSON() ([]byte, error) {
+	if r.Title == "" {
+		return nil, fmt.Errorf("a cached video result requires a title")
+	}
+	type result InlineQueryResultCachedVideo
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "video", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
+// InlineQueryResultCachedMpeg4Gif sends a soundless MP4 animation by its
+// file_id, which is what Telegram makes of a GIF. It has no description.
+type InlineQueryResultCachedMpeg4Gif struct {
+	ID                    string                `json:"id"`
+	Mpeg4FileID           string                `json:"mpeg4_file_id"`
+	Title                 string                `json:"title,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent   InputMessageContent   `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultCachedMpeg4Gif) inlineQueryResult() {}
+
+func (r InlineQueryResultCachedMpeg4Gif) MarshalJSON() ([]byte, error) {
+	type result InlineQueryResultCachedMpeg4Gif
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "mpeg4_gif", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
 // InlineQueryResultArticle is a text card. It is what a bot answers with when
 // it has nothing to show yet -- a prompt, or an empty-result notice -- because
 // an inline answer with no results at all shows the user nothing whatsoever.
@@ -141,6 +226,43 @@ type InlineAnswer struct {
 	// depends on who is asking -- their language, their permissions, a token
 	// bound to them -- must set it.
 	IsPersonal bool
+	// Button is shown above the results: it opens a Mini App or sends /start
+	// with a parameter. Nil shows none.
+	Button *InlineQueryResultsButton
+}
+
+// InlineQueryResultsButton is the button above an inline answer. It does
+// exactly one thing: WebApp opens a Mini App, which can switch back to
+// inline mode, or StartParameter opens the bot's chat with /start and that
+// parameter (1 to 64 of A-Z, a-z, 0-9, _ and -), which is how a bot asks a
+// person to sign in or connect something first.
+type InlineQueryResultsButton struct {
+	Text           string      `json:"text"`
+	WebApp         *WebAppInfo `json:"web_app,omitempty"`
+	StartParameter string      `json:"start_parameter,omitempty"`
+}
+
+func (b InlineQueryResultsButton) check() error {
+	switch {
+	case b.Text == "":
+		return fmt.Errorf("an inline results button requires a text")
+	case (b.WebApp == nil) == (b.StartParameter == ""):
+		return fmt.Errorf("an inline results button takes exactly one of a web app and a start parameter")
+	case b.WebApp != nil && b.WebApp.URL == "":
+		return fmt.Errorf("an inline results button's web app requires a URL")
+	case len(b.StartParameter) > 64 || !startParameter(b.StartParameter):
+		return fmt.Errorf("an inline results button's start parameter is 1 to 64 of A-Z, a-z, 0-9, _ and -")
+	}
+	return nil
+}
+
+func startParameter(s string) bool {
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // AnswerInlineQuery replies to an inline query. Telegram accepts one answer
@@ -168,6 +290,12 @@ func (c *Client) AnswerInlineQuery(ctx context.Context, inlineQueryID string, an
 	if answer.IsPersonal {
 		req["is_personal"] = true
 	}
+	if answer.Button != nil {
+		if err := answer.Button.check(); err != nil {
+			return err
+		}
+		req["button"] = answer.Button
+	}
 	var resp struct {
 		OK bool `json:"ok"`
 	}
@@ -178,6 +306,80 @@ func (c *Client) AnswerInlineQuery(ctx context.Context, inlineQueryID string, an
 		return okFalse("answerInlineQuery")
 	}
 	return nil
+}
+
+// A message sent through the bot in inline mode lives in somebody else's
+// chat, which the bot may not be in. It is addressed by the
+// inline_message_id that [ChosenInlineResult] and [CallbackQuery] carry, and
+// an edit of it returns true rather than the message. A "message is not
+// modified" answer is success for every one of them, as there is nothing to
+// return either way.
+
+// EditInlineMessageText replaces the text of an inline message, as HTML with
+// link previews off, like [Client.EditMessageText].
+func (c *Client) EditInlineMessageText(ctx context.Context, inlineMessageID, text string, markup *InlineKeyboardMarkup) error {
+	req := map[string]any{"text": text, "parse_mode": "HTML", "link_preview_options": noLinkPreview}
+	return c.editInline(ctx, "editMessageText", inlineMessageID, req, markup)
+}
+
+// EditInlineMessageMedia replaces the media of an inline message, which is
+// how an inline card turns into a result once it is ready. Telegram takes no
+// upload here, so the media is a file_id or a URL; an upload is refused
+// before anything is sent.
+func (c *Client) EditInlineMessageMedia(ctx context.Context, inlineMessageID string, media InputMedia, markup *InlineKeyboardMarkup) error {
+	if media == nil {
+		return fmt.Errorf("editMessageMedia requires media")
+	}
+	object, file := media.item()
+	var files []attachment
+	value, err := c.attachInner(&files, "media", file)
+	if err != nil {
+		return err
+	}
+	if len(files) > 0 {
+		return fmt.Errorf("editMessageMedia of an inline message takes a file_id or a URL, not an upload")
+	}
+	object["media"] = value
+	return c.editInline(ctx, "editMessageMedia", inlineMessageID, map[string]any{"media": object}, markup)
+}
+
+// EditInlineMessageCaption replaces the caption of an inline message, with
+// the options of [Client.EditMessageCaption].
+func (c *Client) EditInlineMessageCaption(ctx context.Context, inlineMessageID, caption string, opts EditCaptionOptions) error {
+	req := map[string]any{"caption": caption}
+	if caption != "" {
+		req["parse_mode"] = "HTML"
+	}
+	if opts.ShowCaptionAboveMedia {
+		req["show_caption_above_media"] = true
+	}
+	return c.editInline(ctx, "editMessageCaption", inlineMessageID, req, opts.Markup)
+}
+
+// EditInlineMessageReplyMarkup changes only the buttons of an inline message.
+func (c *Client) EditInlineMessageReplyMarkup(ctx context.Context, inlineMessageID string, markup *InlineKeyboardMarkup) error {
+	return c.editInline(ctx, "editMessageReplyMarkup", inlineMessageID, map[string]any{}, markup)
+}
+
+func (c *Client) editInline(ctx context.Context, method, inlineMessageID string, fields map[string]any, markup *InlineKeyboardMarkup) error {
+	if inlineMessageID == "" {
+		return fmt.Errorf("%s of an inline message requires its inline_message_id", method)
+	}
+	fields["inline_message_id"] = inlineMessageID
+	if markup != nil {
+		fields["reply_markup"] = markup
+	}
+	var resp struct {
+		OK bool `json:"ok"`
+	}
+	err := c.post(ctx, method, fields, &resp)
+	if IsMessageNotModified(err) {
+		return nil
+	}
+	if err == nil && !resp.OK {
+		return okFalse(method)
+	}
+	return err
 }
 
 // captionParseMode declares HTML only when there is a caption to parse.

@@ -277,20 +277,23 @@ type ExternalReplyInfo struct {
 	HasMediaSpoiler bool `json:"has_media_spoiler,omitempty"`
 }
 
+// CallbackQuery is a press of a callback button.
 type CallbackQuery struct {
 	ID   string `json:"id"`
 	From User   `json:"from"`
-	// Message is absent for a callback from an inline message, which none of
-	// the family's bots send today. Reading Chat.ID off a zero value would
-	// address chat 0, so a bot that adds inline mode must make this a pointer
-	// first -- a change every caller has to see, which is why it is written
-	// down rather than made now.
+	// Message is the bot's message the button was on. It is nil for a button
+	// on a message sent through the bot in inline mode, which has
+	// InlineMessageID instead: there is no chat to read, and a bot that reads
+	// Message.Chat checks for nil first.
 	//
 	// A message the bot can no longer access (deleted, or too old) arrives with
 	// date 0 and nothing but Chat and MessageID, so a bot that edits the message
 	// tests Message.Date == 0 before trusting any other field.
-	Message Message `json:"message"`
-	// ChatInstance identifies the message a callback came from even when
+	Message *Message `json:"message,omitempty"`
+	// InlineMessageID is the inline message the button was on, the id the
+	// EditInlineMessage methods take. Empty when Message is set.
+	InlineMessageID string `json:"inline_message_id,omitempty"`
+	// ChatInstance identifies the chat a callback came from even when
 	// Message is absent.
 	ChatInstance string `json:"chat_instance"`
 	Data         string `json:"data,omitempty"`
@@ -379,6 +382,9 @@ type Update struct {
 	// administrator of the chat and has named them in [WithAllowedUpdates].
 	MessageReaction      *MessageReactionUpdated      `json:"message_reaction,omitempty"`
 	MessageReactionCount *MessageReactionCountUpdated `json:"message_reaction_count,omitempty"`
+
+	// StoppedMessageGeneration is a press of Stop on a draft (Bot API 10.3).
+	StoppedMessageGeneration *MessageGenerationStopped `json:"stopped_message_generation,omitempty"`
 }
 
 // LinkPreviewOptions controls Telegram's own preview of a link in a message.
