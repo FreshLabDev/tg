@@ -37,9 +37,11 @@ reading the source.
 
 - **`SendMessage` always sends HTML with link previews off**, and
   `SendPlainText` and `SendTextWithPreview` are further methods rather than
-  options. There is no way to ask for MarkdownV2, `disable_notification` or
-  `protect_content` without dropping to `Call` and losing the typed return. The
-  next variant should become options rather than a fourth method.
+  options. There is no way to ask for MarkdownV2, `disable_notification`,
+  `protect_content` or a message effect on a text without dropping to `Call`
+  and losing the typed return. The captioned sends have the three in
+  `CaptionOptions`; the next text variant should become options the same way
+  rather than a fourth method.
 - **A caption is always HTML, and an inline result's caption always declares
   it.** A caller sending a caption assembled from user-controlled text has to
   escape it, exactly as it would for `SendMessage`.

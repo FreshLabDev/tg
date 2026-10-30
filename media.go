@@ -148,6 +148,14 @@ type CaptionOptions struct {
 	// Ephemeral sends the message to one member of the group only. Nil sends
 	// it to the chat.
 	Ephemeral *Ephemeral
+	// DisableNotification sends the message silently: the receivers get a
+	// notification with no sound.
+	DisableNotification bool
+	// ProtectContent keeps the message from being forwarded and saved.
+	ProtectContent bool
+	// MessageEffectID is the effect played over the message as it arrives.
+	// Telegram takes it in private chats only.
+	MessageEffectID string
 }
 
 // VideoOptions carries what Telegram cannot learn from a file it did not
@@ -159,6 +167,15 @@ type VideoOptions struct {
 	Height            int
 	Duration          int
 	SupportsStreaming bool
+	// Cover is the picture clients show before the video plays, in place of
+	// a frame they pick themselves. An upload travels as a part of its own,
+	// named by an attach:// reference.
+	Cover InputFile
+	// StartTimestamp is the second the video starts playing from.
+	StartTimestamp int
+	// ShowCaptionAboveMedia puts the caption over the video instead of under
+	// it.
+	ShowCaptionAboveMedia bool
 }
 
 // AnimationOptions carries what Telegram cannot learn from a file it did not
@@ -218,6 +235,15 @@ func mediaFields(chatID int64, opts CaptionOptions) map[string]any {
 	if opts.Markup != nil {
 		req["reply_markup"] = opts.Markup
 	}
+	if opts.DisableNotification {
+		req["disable_notification"] = true
+	}
+	if opts.ProtectContent {
+		req["protect_content"] = true
+	}
+	if opts.MessageEffectID != "" {
+		req["message_effect_id"] = opts.MessageEffectID
+	}
 	return req
 }
 
@@ -244,9 +270,22 @@ func (c *Client) SendVideo(ctx context.Context, chatID int64, video InputFile, o
 	if opts.SupportsStreaming {
 		fields["supports_streaming"] = true
 	}
+	if opts.StartTimestamp > 0 {
+		fields["start_timestamp"] = opts.StartTimestamp
+	}
+	if opts.ShowCaptionAboveMedia {
+		fields["show_caption_above_media"] = true
+	}
 	var files []attachment
 	if err := c.attachTop(fields, &files, "video", video); err != nil {
 		return Message{}, err
+	}
+	if opts.Cover != nil {
+		cover, err := c.attachInner(&files, "cover", opts.Cover)
+		if err != nil {
+			return Message{}, fmt.Errorf("cover: %w", err)
+		}
+		fields["cover"] = cover
 	}
 	return c.sendMedia(ctx, "sendVideo", fields, files)
 }

@@ -13,6 +13,20 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Added
+
+- **Video cover and start.** `VideoOptions` gained `Cover`, the picture
+  clients show before the video plays, `StartTimestamp` and
+  `ShowCaptionAboveMedia`. A cover is a file_id, a URL, a path on a
+  self-hosted server or an upload; an upload goes as a part of its own,
+  named by an `attach://` reference, so a video and its cover travel in one
+  `sendVideo`.
+- **Send options.** `CaptionOptions` gained `DisableNotification`,
+  `ProtectContent` and `MessageEffectID`, so every captioned send (photo,
+  video, animation, audio, document, ephemeral or not) can go silently,
+  protected, or with an effect, without a new method. Text sends still have
+  none; `docs/limitations.md` says so.
+
 ## v0.2.0-alpha.2 - 2026-10-27
 
 A photo, an animation or a document can be sent to one member of a group
