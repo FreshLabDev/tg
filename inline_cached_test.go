@@ -101,6 +101,22 @@ func TestInlineMessagesAreEditedByTheirID(t *testing.T) {
 			"editMessageText",
 			map[string]any{"text": "<b>done</b>", "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}},
 		},
+		"text with a preview": {
+			func(c *Client) error {
+				preview := &LinkPreviewOptions{URL: "https://framy.test/card.jpg", PreferLargeMedia: true, ShowAboveText: true}
+				return c.EditInlineMessageTextWithPreview(context.Background(), "im-1", "a fox", preview, kb)
+			},
+			"editMessageText",
+			map[string]any{"text": "a fox", "parse_mode": "HTML", "link_preview_options": map[string]any{
+				"url": "https://framy.test/card.jpg", "prefer_large_media": true, "show_above_text": true}},
+		},
+		"text with no preview": {
+			func(c *Client) error {
+				return c.EditInlineMessageTextWithPreview(context.Background(), "im-1", "a fox", nil, kb)
+			},
+			"editMessageText",
+			map[string]any{"text": "a fox", "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}},
+		},
 		"media": {
 			func(c *Client) error {
 				return c.EditInlineMessageMedia(context.Background(), "im-1", InputMediaPhoto{Media: InputFileString{Data: "photo-id"}, Caption: "a fox"}, kb)
@@ -157,6 +173,9 @@ func TestAnInlineEditTelegramWouldRefuseIsNotSent(t *testing.T) {
 	}
 	if err := c.EditInlineMessageText(ctx, "", "text", nil); err == nil {
 		t.Error("an edit without an id accepted")
+	}
+	if err := c.EditInlineMessageTextWithPreview(ctx, "", "text", nil, nil); err == nil {
+		t.Error("an edit with a preview and without an id accepted")
 	}
 	if err := c.EditInlineMessageMedia(ctx, "im-1", nil, nil); err == nil {
 		t.Error("an edit without media accepted")

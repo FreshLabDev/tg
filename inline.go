@@ -407,6 +407,19 @@ func (c *Client) EditInlineMessageText(ctx context.Context, inlineMessageID, tex
 	return c.editInline(ctx, "editMessageText", inlineMessageID, req, markup)
 }
 
+// EditInlineMessageTextWithPreview replaces the text of an inline message and
+// lets Telegram show a preview of a link, which need not be in the text: the
+// way an inline message carries a picture while it may still become text
+// again, since a media message never can. A nil preview disables it, like
+// [Client.SendTextWithPreview].
+func (c *Client) EditInlineMessageTextWithPreview(ctx context.Context, inlineMessageID, text string, preview *LinkPreviewOptions, markup *InlineKeyboardMarkup) error {
+	if preview == nil {
+		preview = noLinkPreview
+	}
+	req := map[string]any{"text": text, "parse_mode": "HTML", "link_preview_options": preview}
+	return c.editInline(ctx, "editMessageText", inlineMessageID, req, markup)
+}
+
 // EditInlineMessageMedia replaces the media of an inline message, which is
 // how an inline card turns into a result once it is ready. Telegram takes no
 // upload here, so the media is a file_id or a URL; an upload is refused

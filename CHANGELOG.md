@@ -34,6 +34,11 @@ Use this section for changes that are merged but not released yet.
   `Message.GuestBotCallerUser` and `GuestBotCallerChat` say who summoned a
   guest bot's message, and `Me.SupportsGuestQueries` whether Guest Mode is
   on. framy answers `@framyin_bot` in reply to a photo this way.
+- **Inline text with a link preview.** `EditInlineMessageTextWithPreview`
+  edits an inline message's text with Telegram's preview of a link that need
+  not be in the text, as `SendTextWithPreview` sends one. An inline message
+  can show a picture this way and still go back to plain text later, which
+  a media message cannot.
 
 ## v0.2.0-alpha.3 - 2026-10-30
 
