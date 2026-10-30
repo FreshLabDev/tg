@@ -13,6 +13,21 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+### Added
+
+- **Prepared inline messages.** `SavePreparedInlineMessage` saves a result
+  for one person, and a Mini App passes its id to `shareMessage`, so the
+  person sends it to any chat they pick, the bot's or not.
+  `PreparedChats` names where it may go (`AnyChat` for all four kinds), and
+  no kind at all is refused before sending. framy shares results this way;
+  maply can drop its own `SavePreparedPhoto` and `SavePreparedAnimation`.
+- **Inline results by URL.** `InlineQueryResultVideo` and
+  `InlineQueryResultMpeg4Gif` send a file Telegram fetches, and refuse a
+  card without the URL, the thumbnail or, for a video, the title, which
+  Telegram requires. An empty video `MimeType` is `video/mp4`.
+  `InlineQueryResultPhoto` gained `PhotoWidth`, `PhotoHeight`,
+  `ShowCaptionAboveMedia` and `InputMessageContent`.
+
 ## v0.2.0-alpha.3 - 2026-10-30
 
 Inline answers of files Telegram already has, edits of inline messages,

@@ -55,16 +55,21 @@ type InlineQueryResult interface {
 // card is picked; ThumbnailURL is what the picker shows while scrolling, and
 // should be the smaller of the two.
 type InlineQueryResultPhoto struct {
-	ID           string `json:"id"`
+	ID string `json:"id"`
+	// PhotoURL is a JPEG of at most 5 MB, as Telegram documents it.
 	PhotoURL     string `json:"photo_url"`
 	ThumbnailURL string `json:"thumbnail_url"`
+	PhotoWidth   int    `json:"photo_width,omitempty"`
+	PhotoHeight  int    `json:"photo_height,omitempty"`
 	// Title and Description appear in the picker only, never on the message
 	// that gets sent.
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	// Caption is HTML and does appear on the sent message.
-	Caption     string                `json:"caption,omitempty"`
-	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent   InputMessageContent   `json:"input_message_content,omitempty"`
 }
 
 func (InlineQueryResultPhoto) inlineQueryResult() {}
@@ -76,6 +81,86 @@ func (r InlineQueryResultPhoto) MarshalJSON() ([]byte, error) {
 		ParseMode string `json:"parse_mode,omitempty"`
 		result
 	}{Type: "photo", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
+// InlineQueryResultVideo sends a video Telegram fetches from VideoURL: an MP4
+// file, or with MimeType "text/html" a page with a player, which goes as a
+// link. Telegram requires the title and a JPEG thumbnail, so a card without
+// either is refused before sending. An empty MimeType is "video/mp4".
+type InlineQueryResultVideo struct {
+	ID       string `json:"id"`
+	VideoURL string `json:"video_url"`
+	MimeType string `json:"mime_type"`
+	// ThumbnailURL is a JPEG, shown in the picker and as the video's cover.
+	ThumbnailURL          string                `json:"thumbnail_url"`
+	Title                 string                `json:"title"`
+	Description           string                `json:"description,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	VideoWidth            int                   `json:"video_width,omitempty"`
+	VideoHeight           int                   `json:"video_height,omitempty"`
+	VideoDuration         int                   `json:"video_duration,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent   InputMessageContent   `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultVideo) inlineQueryResult() {}
+
+func (r InlineQueryResultVideo) MarshalJSON() ([]byte, error) {
+	switch {
+	case r.VideoURL == "":
+		return nil, fmt.Errorf("a video result requires its URL")
+	case r.Title == "":
+		return nil, fmt.Errorf("a video result requires a title")
+	case r.ThumbnailURL == "":
+		return nil, fmt.Errorf("a video result requires a thumbnail")
+	}
+	if r.MimeType == "" {
+		r.MimeType = "video/mp4"
+	}
+	type result InlineQueryResultVideo
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "video", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
+// InlineQueryResultMpeg4Gif sends a soundless MP4 animation Telegram fetches
+// from Mpeg4URL. Telegram requires a thumbnail, so a card without one is
+// refused before sending.
+type InlineQueryResultMpeg4Gif struct {
+	ID            string `json:"id"`
+	Mpeg4URL      string `json:"mpeg4_url"`
+	Mpeg4Width    int    `json:"mpeg4_width,omitempty"`
+	Mpeg4Height   int    `json:"mpeg4_height,omitempty"`
+	Mpeg4Duration int    `json:"mpeg4_duration,omitempty"`
+	// ThumbnailURL is a JPEG, a GIF or an MP4; ThumbnailMimeType names which,
+	// and empty is "image/jpeg".
+	ThumbnailURL          string                `json:"thumbnail_url"`
+	ThumbnailMimeType     string                `json:"thumbnail_mime_type,omitempty"`
+	Title                 string                `json:"title,omitempty"`
+	Caption               string                `json:"caption,omitempty"`
+	ShowCaptionAboveMedia bool                  `json:"show_caption_above_media,omitempty"`
+	ReplyMarkup           *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent   InputMessageContent   `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultMpeg4Gif) inlineQueryResult() {}
+
+func (r InlineQueryResultMpeg4Gif) MarshalJSON() ([]byte, error) {
+	switch {
+	case r.Mpeg4URL == "":
+		return nil, fmt.Errorf("an MPEG-4 animation result requires its URL")
+	case r.ThumbnailURL == "":
+		return nil, fmt.Errorf("an MPEG-4 animation result requires a thumbnail")
+	}
+	type result InlineQueryResultMpeg4Gif
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "mpeg4_gif", ParseMode: captionParseMode(r.Caption), result: result(r)})
 }
 
 // The cached results send a file Telegram already has, by its file_id: a
