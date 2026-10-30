@@ -13,6 +13,12 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.3 - 2026-10-30
+
+Inline answers of files Telegram already has, edits of inline messages,
+drafts with Stop, and a cover on a video. A bot that passes a callback's
+message on as a value no longer compiles: see Breaking.
+
 ### Added
 
 - **Video cover and start.** `VideoOptions` gained `Cover`, the picture
@@ -47,7 +53,7 @@ Use this section for changes that are merged but not released yet.
   (`MessageGenerationStopped`: the chat, the topic and the draft id). A draft
   id of zero is refused before sending.
 
-### Changed
+### Breaking
 
 - **`CallbackQuery.Message` is a pointer**, and `CallbackQuery.InlineMessageID`
   is new. A press on a button of an inline message has no message, and the
