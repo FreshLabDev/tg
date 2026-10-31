@@ -848,3 +848,67 @@ func TestEditMessageCaptionReportsNotModifiedAsTheError(t *testing.T) {
 		t.Fatalf("message = %+v, err = %v, want the not-modified error and no message", msg, err)
 	}
 }
+
+// A video in an album carries its cover as a part of its own, next to the
+// video's, and a cover Telegram already holds goes by its id.
+func TestAlbumVideosCarryTheirCovers(t *testing.T) {
+	handler, got := captureUpload(t, `{"ok":true,"result":[{"message_id":1},{"message_id":2}]}`)
+	c, _ := newTestClient(t, handler)
+
+	_, err := c.SendMediaGroup(context.Background(), 42, []InputMedia{
+		InputMediaVideo{Media: InputFileUpload{Filename: "a.mp4", Data: strings.NewReader("mp4-a")},
+			Cover: InputFileUpload{Filename: "cover.jpg", Data: strings.NewReader("jpeg-a")}, StartTimestamp: 2},
+		InputMediaVideo{Media: InputFileUpload{Filename: "b.mp4", Data: strings.NewReader("mp4-b")}, Cover: InputFileString{Data: "AgACcover"}},
+	}, 0)
+	if err != nil {
+		t.Fatalf("SendMediaGroup: %v", err)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(got.fields["media"]), &items); err != nil {
+		t.Fatalf("media is not JSON: %v", err)
+	}
+	if items[0]["media"] != "attach://media0" || items[0]["cover"] != "attach://cover0" || items[0]["start_timestamp"] != float64(2) {
+		t.Fatalf("first item = %v", items[0])
+	}
+	if items[1]["media"] != "attach://media1" || items[1]["cover"] != "AgACcover" || items[1]["start_timestamp"] != nil {
+		t.Fatalf("second item = %v", items[1])
+	}
+	if got.files["media0"] != "mp4-a" || got.files["cover0"] != "jpeg-a" || got.files["media1"] != "mp4-b" {
+		t.Fatalf("uploaded parts = %v", got.files)
+	}
+	if _, has := got.files["cover1"]; has {
+		t.Fatal("a cover Telegram already holds must not be uploaded again")
+	}
+}
+
+// A video without a cover has no cover field, and an edit takes one too.
+func TestEditMessageMediaTakesAVideoCover(t *testing.T) {
+	handler, got := captureUpload(t, `{"ok":true,"result":{"message_id":1}}`)
+	c, _ := newTestClient(t, handler)
+
+	err := c.EditMessageMedia(context.Background(), 42, 7,
+		InputMediaVideo{Media: InputFileUpload{Filename: "v.mp4", Data: strings.NewReader("mp4")},
+			Cover: InputFileUpload{Filename: "cover.jpg", Data: strings.NewReader("jpeg")}}, nil)
+	if err != nil {
+		t.Fatalf("EditMessageMedia: %v", err)
+	}
+	var media map[string]any
+	if err := json.Unmarshal([]byte(got.fields["media"]), &media); err != nil {
+		t.Fatalf("media is not JSON: %v", err)
+	}
+	if media["media"] != "attach://media" || media["cover"] != "attach://cover" || got.files["cover"] != "jpeg" {
+		t.Fatalf("media = %v, parts %v", media, got.files)
+	}
+
+	err = c.EditMessageMedia(context.Background(), 42, 7, InputMediaVideo{Media: InputFileUpload{Filename: "w.mp4", Data: strings.NewReader("mp4")}}, nil)
+	if err != nil {
+		t.Fatalf("EditMessageMedia: %v", err)
+	}
+	media = nil
+	if err := json.Unmarshal([]byte(got.fields["media"]), &media); err != nil {
+		t.Fatalf("media is not JSON: %v", err)
+	}
+	if _, has := media["cover"]; has {
+		t.Fatalf("media = %v, want no cover", media)
+	}
+}

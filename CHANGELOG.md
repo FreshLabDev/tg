@@ -49,6 +49,11 @@ Use this section for changes that are merged but not released yet.
   pictures; "not modified" is success. A media item without an id is
   refused before sending. framy draws its run preview this way: the card on
   top, the models and settings in `<details>` below.
+- **A video's cover in an album.** `InputMediaVideo` gained `Cover` and
+  `StartTimestamp`, as `VideoOptions` has them for a video sent alone. An
+  uploaded cover goes as a multipart part of its own, in `SendMediaGroup`
+  and in `EditMessageMedia`. framy sends the videos of one press on its
+  site as one album, each with the frame its result card shows.
 
 ## v0.2.0-alpha.3 - 2026-10-30
 

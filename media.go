@@ -382,6 +382,12 @@ type InputMediaVideo struct {
 	Height            int
 	Duration          int
 	SupportsStreaming bool
+	// Cover is the picture clients show before the video plays, as
+	// [VideoOptions.Cover] is for a video sent alone. An upload travels as a
+	// part of its own.
+	Cover InputFile
+	// StartTimestamp is the second the video starts playing from.
+	StartTimestamp int
 	// ShowCaptionAboveMedia puts the caption over the video instead of under it.
 	ShowCaptionAboveMedia bool
 	// HasSpoiler hides the video under a spoiler until the user taps it.
@@ -402,8 +408,33 @@ func (m InputMediaVideo) item() (map[string]any, InputFile) {
 	if m.SupportsStreaming {
 		object["supports_streaming"] = true
 	}
+	if m.StartTimestamp > 0 {
+		object["start_timestamp"] = m.StartTimestamp
+	}
 	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
 	return object, m.Media
+}
+
+func (m InputMediaVideo) cover() InputFile { return m.Cover }
+
+// coveredMedia is an item that may carry a second file, its cover.
+type coveredMedia interface {
+	cover() InputFile
+}
+
+// attachCover puts the item's cover, when it has one, in the object's
+// "cover" field: an upload as a part of its own named name.
+func (c *Client) attachCover(files *[]attachment, object map[string]any, name string, media InputMedia) error {
+	covered, ok := media.(coveredMedia)
+	if !ok || covered.cover() == nil {
+		return nil
+	}
+	value, err := c.attachInner(files, name, covered.cover())
+	if err != nil {
+		return fmt.Errorf("cover: %w", err)
+	}
+	object["cover"] = value
+	return nil
 }
 
 // InputMediaAnimation is a GIF or an H.264/MPEG-4 AVC video without sound. In
@@ -494,6 +525,9 @@ func (c *Client) SendMediaGroup(ctx context.Context, chatID int64, media []Input
 			return nil, fmt.Errorf("media[%d]: %w", i, err)
 		}
 		object["media"] = value
+		if err := c.attachCover(&files, object, "cover"+strconv.Itoa(i), entry); err != nil {
+			return nil, fmt.Errorf("media[%d]: %w", i, err)
+		}
 		items = append(items, object)
 	}
 	fields["media"] = items
@@ -569,6 +603,9 @@ func (c *Client) editMessageMedia(ctx context.Context, chatID, messageID int64, 
 		return err
 	}
 	object["media"] = value
+	if err := c.attachCover(&files, object, "cover", media); err != nil {
+		return err
+	}
 	fields["media"] = object
 	if markup != nil {
 		fields["reply_markup"] = markup
