@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,9 +39,10 @@ func (c *Client) get(ctx context.Context, method string, values url.Values, out 
 // not retried this way because a lost response would double-send.
 //
 // Honoring Retry-After means one call can block for as long as Telegram asks,
-// three times over. A caller on a path that must stay responsive -- anything
-// running on an update loop -- should pass a context with its own deadline
-// rather than assume this returns quickly.
+// up to [WithMaxRetryAfter] each time, three times over. A caller on a path
+// that must stay responsive -- anything running on an update loop -- should
+// pass a context with its own deadline rather than assume this returns
+// quickly.
 func (c *Client) getWithTimeout(ctx context.Context, method string, values url.Values, out any, timeout time.Duration) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxGetAttempts; attempt++ {
@@ -49,7 +53,7 @@ func (c *Client) getWithTimeout(ctx context.Context, method string, values url.V
 			return nil
 		}
 		lastErr = err
-		if ctx.Err() != nil || attempt == maxGetAttempts || !retryableError(err) {
+		if ctx.Err() != nil || attempt == maxGetAttempts || !retryableError(err) || retryAfter > c.maxRetryAfter {
 			return err
 		}
 		delay := retryAfter
@@ -65,13 +69,17 @@ func (c *Client) getWithTimeout(ctx context.Context, method string, values url.V
 	return lastErr
 }
 
-// post sends a JSON body.
+// post sends a JSON body under the ordinary timeout.
 func (c *Client) post(ctx context.Context, method string, body any, out any) error {
+	return c.postJSON(ctx, method, body, out, c.timeout)
+}
+
+func (c *Client) postJSON(ctx context.Context, method string, body any, out any, timeout time.Duration) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	return c.postBody(ctx, method, "application/json", raw, out)
+	return c.postBody(ctx, method, "application/json", raw, out, timeout)
 }
 
 // postMultipart sends a request that carries files. Telegram reads scalar
@@ -83,7 +91,7 @@ func (c *Client) post(ctx context.Context, method string, body any, out any) err
 // Retry-After and a pipe cannot be rewound. That bounds an upload by what the
 // process can hold: anything genuinely large belongs on a self-hosted server,
 // where [InputFileLocal] hands over a path instead of bytes.
-func (c *Client) postMultipart(ctx context.Context, method string, fields map[string]any, files []attachment, out any) error {
+func (c *Client) postMultipart(ctx context.Context, method string, fields map[string]any, files []attachment, out any, timeout time.Duration) error {
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
 	// Sorted, so one request produces one body: a test reading the parts back
@@ -103,6 +111,9 @@ func (c *Client) postMultipart(ctx context.Context, method string, fields map[st
 		}
 	}
 	for _, file := range files {
+		if file.data == nil {
+			continue // a path on the server, already in its field
+		}
 		part, err := form.CreateFormFile(file.field, file.filename)
 		if err != nil {
 			return err
@@ -114,7 +125,7 @@ func (c *Client) postMultipart(ctx context.Context, method string, fields map[st
 	if err := form.Close(); err != nil {
 		return err
 	}
-	return c.postBody(ctx, method, form.FormDataContentType(), body.Bytes(), out)
+	return c.postBody(ctx, method, form.FormDataContentType(), body.Bytes(), out, timeout)
 }
 
 // formValue renders one multipart field the way Telegram parses it.
@@ -135,12 +146,13 @@ func formValue(value any) (string, error) {
 }
 
 // postBody sends one prepared body. A POST is replayed only when Telegram
-// itself asked for it with Retry-After: any other failure may have been
-// delivered, and a second send would duplicate a message.
-func (c *Client) postBody(ctx context.Context, method, contentType string, raw []byte, out any) error {
+// itself asked for it with Retry-After, and only once and within
+// [WithMaxRetryAfter]: any other failure may have been delivered, and a second
+// send would duplicate a message. [OutcomeUnknown] tells the caller which.
+func (c *Client) postBody(ctx context.Context, method, contentType string, raw []byte, out any, timeout time.Duration) error {
 	var lastErr error
 	for attempt := 1; attempt <= 2; attempt++ {
-		retryAfter, err := c.attempt(ctx, c.timeout, func(attemptCtx context.Context) (*http.Request, error) {
+		retryAfter, err := c.attempt(ctx, timeout, func(attemptCtx context.Context) (*http.Request, error) {
 			req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, c.endpoint(method), bytes.NewReader(raw))
 			if err != nil {
 				return nil, err
@@ -152,7 +164,7 @@ func (c *Client) postBody(ctx context.Context, method, contentType string, raw [
 			return nil
 		}
 		lastErr = err
-		if retryAfter <= 0 || attempt == 2 {
+		if retryAfter <= 0 || attempt == 2 || retryAfter > c.maxRetryAfter {
 			return err
 		}
 		if waitErr := c.sleep(ctx, retryAfter); waitErr != nil {
@@ -167,21 +179,28 @@ func (c *Client) postBody(ctx context.Context, method, contentType string, raw [
 func (c *Client) attempt(ctx context.Context, timeout time.Duration, build func(context.Context) (*http.Request, error), method string, out any, n int) (time.Duration, error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := build(attemptCtx)
+	var progress delivery
+	req, err := build(httptrace.WithClientTrace(attemptCtx, progress.trace()))
 	if err != nil {
-		err = c.redactError(err)
+		err = c.transportFailure(err, true)
 		c.emit(attemptCtx, method, 0, 0, n, err)
 		return 0, err
 	}
-	return c.do(method, req, out, n)
+	return c.do(method, req, out, n, &progress)
 }
 
-func (c *Client) do(method string, req *http.Request, out any, n int) (time.Duration, error) {
+func (c *Client) do(method string, req *http.Request, out any, n int, progress *delivery) (time.Duration, error) {
 	ctx := req.Context()
 	started := time.Now()
+	if err := ctx.Err(); err != nil {
+		// The caller gave up before anything went out.
+		err := c.transportFailure(err, true)
+		c.emit(ctx, method, 0, 0, n, err)
+		return 0, err
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		err = c.redactError(err)
+		err = c.transportFailure(err, progress.unsent(err))
 		c.emit(ctx, method, 0, time.Since(started), n, err)
 		return 0, err
 	}
@@ -217,6 +236,47 @@ func (c *Client) do(method string, req *http.Request, out any, n int) (time.Dura
 	}
 	c.emit(ctx, method, resp.StatusCode, time.Since(started), n, err)
 	return 0, err
+}
+
+// delivery records how far one attempt got, from the transport's own trace, so
+// that a failure can tell a request that never left from one Telegram may have
+// acted on. A server acts on a request only once it has the whole of it, so a
+// request that was never written whole was not acted on.
+type delivery struct {
+	// traced is set once the transport reports anything at all: a custom
+	// RoundTripper may report nothing, and then silence proves nothing.
+	traced atomic.Bool
+	// written is set once the whole request, body included, went out. It
+	// stays set: a transport that retries on its own may fail a later write
+	// after an earlier one reached the server.
+	written atomic.Bool
+}
+
+func (d *delivery) trace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		GetConn: func(string) { d.traced.Store(true) },
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			d.traced.Store(true)
+			if info.Err == nil {
+				d.written.Store(true)
+			}
+		},
+	}
+}
+
+// unsent reports whether a failed attempt certainly did not reach Telegram.
+// Without a trace only a failure to resolve the host or to connect says so;
+// anything else may have come after the request was written.
+func (d *delivery) unsent(err error) bool {
+	if d.written.Load() {
+		return false
+	}
+	if d.traced.Load() {
+		return true
+	}
+	var dnsErr *net.DNSError
+	var opErr *net.OpError
+	return errors.As(err, &dnsErr) || errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 // probeKey marks the requests a capability check makes, so an observer can

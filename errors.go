@@ -160,6 +160,9 @@ var ErrUnexpectedResult = errors.New("telegram returned an unexpected result")
 type transportError struct {
 	msg   string
 	cause error
+	// unsent is true when the request certainly did not reach Telegram: it
+	// was never written whole. False means it may have.
+	unsent bool
 }
 
 func (e *transportError) Error() string { return e.msg }
@@ -174,6 +177,12 @@ func (c *Client) redactError(err error) error {
 	if err == nil {
 		return nil
 	}
+	return c.transportFailure(err, false)
+}
+
+// transportFailure is redactError for a failed attempt at a Bot API method,
+// which also records whether the request certainly never left.
+func (c *Client) transportFailure(err error, unsent bool) *transportError {
 	cause := err
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
@@ -183,7 +192,121 @@ func (c *Client) redactError(err error) error {
 	if c.token != "" {
 		msg = strings.ReplaceAll(msg, c.token, "***")
 	}
-	return &transportError{msg: "telegram transport failed: " + msg, cause: cause}
+	return &transportError{msg: "telegram transport failed: " + msg, cause: cause, unsent: unsent}
+}
+
+// OutcomeUnknown reports whether a failed call may still have taken effect, so
+// that making it again could do the thing twice: Telegram answered 5xx, its
+// answer could not be read ([ErrUnexpectedResult], where the call did take
+// effect), or the connection failed after the whole request was written.
+//
+// It is false for a nil error and for every failure known to have done
+// nothing: a refusal (4xx, 429 included), a request that was never written
+// whole (the host did not resolve, the connection was refused, the upload
+// broke off or timed out halfway), and a call refused before any request, such
+// as an album with no items.
+//
+// A sender that must not post a message twice asks this before it repeats a
+// send: true means the message may already be in the chat. A request the
+// transport could not follow -- a custom RoundTripper that reports no
+// httptrace events -- counts as possibly delivered unless the failure was in
+// resolving or dialing.
+func OutcomeUnknown(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.code() >= 500
+	}
+	if errors.Is(err, ErrUnexpectedResult) {
+		return true
+	}
+	var transport *transportError
+	if errors.As(err, &transport) {
+		return !transport.unsent
+	}
+	return false
+}
+
+// badRequest reports a 400 whose description holds one of markers. Telegram
+// answers 400 for most unrelated mistakes, so the description is the only
+// thing that tells them apart; markers are lowercase.
+func badRequest(err error, markers ...string) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.code() != http.StatusBadRequest {
+		return false
+	}
+	desc := strings.ToLower(apiErr.Description)
+	for _, marker := range markers {
+		if strings.Contains(desc, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsMessageGone reports that the message an edit or a delete addressed is out
+// of the bot's reach: deleted ("message to edit not found", "message to
+// delete not found"), or one Telegram no longer lets it change ("message can't
+// be edited", "message can't be deleted", for everyone included). Repeating
+// the call fails the same way, so a bot that tidies up after itself counts
+// the message as done.
+func IsMessageGone(err error) bool {
+	return badRequest(err,
+		"message to edit not found",
+		"message to delete not found",
+		"message can't be edited",
+		"message can't be deleted",
+	)
+}
+
+// IsInvalidFileID reports that Telegram could not use the file a request named
+// by a string, an [InputFileString]: a file_id it does not know ("wrong file
+// identifier", "wrong remote file identifier"), or a URL it could not fetch or
+// could not use ("failed to get HTTP URL content", "wrong HTTP URL", "wrong
+// type of the web page content"). The same string fails the same way next
+// time, so a bot that caches file_ids drops it and sends the file itself.
+//
+// A file that is too large is not this: the identifier is fine, the file is
+// not, and whether to forget it is the bot's call.
+func IsInvalidFileID(err error) bool {
+	return badRequest(err,
+		"wrong file identifier",
+		"wrong remote file identifier",
+		"failed to get http url content",
+		"wrong http url",
+		"invalid http url",
+		"wrong type of the web page content",
+	)
+}
+
+// IsCantParseEntities reports that Telegram refused the HTML of a text or a
+// caption: an unclosed or unknown tag, or an unescaped "<" or "&". Sending the
+// same markup again fails the same way.
+func IsCantParseEntities(err error) bool {
+	return badRequest(err, "can't parse entities")
+}
+
+// IsCaptionTooLong reports that a caption was over Telegram's limit. The limit
+// applies to the text after the HTML is parsed, so tags do not count.
+func IsCaptionTooLong(err error) bool {
+	return badRequest(err, "caption is too long", "media_caption_too_long")
+}
+
+// IsLocalFileUnreadable reports that a server started with --local could not
+// use the file at a path it was given ([InputFileLocal]): there is nothing at
+// the path as the server sees it, it is not a regular file, or it is empty.
+// The usual cause is a volume mounted at a different path in the server's
+// container than in the bot's. An empty upload is refused with the same words.
+func IsLocalFileUnreadable(err error) bool {
+	return badRequest(err,
+		"can't find real file path",
+		"can't get stat about the file",
+		"file must be a regular file",
+		"file must have non-empty path",
+		"file must be non-empty",
+	)
 }
 
 // refusal returns an APIError when a 2xx body says ok=false, and nil when the

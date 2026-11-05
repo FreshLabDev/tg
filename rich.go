@@ -232,6 +232,7 @@ func (c *Client) EditEphemeralMessageRich(ctx context.Context, chatID, receiverU
 
 // attachRichMedia puts media into a rich payload: an upload becomes a part
 // of its own, named rich0, rich1 and so on, and the item says attach:// to it.
+// A second file of an item, such as a video's cover, is rich0cover.
 func (c *Client) attachRichMedia(files *[]attachment, rich map[string]any, media []RichMedia) error {
 	if len(media) == 0 {
 		return nil
@@ -241,12 +242,16 @@ func (c *Client) attachRichMedia(files *[]attachment, rich map[string]any, media
 		if m.ID == "" || m.Media == nil {
 			return fmt.Errorf("rich media %d needs an id and a file", i)
 		}
-		object, file := m.Media.item()
-		value, err := c.attachInner(files, "rich"+strconv.Itoa(i), file)
+		name := "rich" + strconv.Itoa(i)
+		object, err := c.attachMedia(files, m.Media, func(field string) string {
+			if field == "media" {
+				return name
+			}
+			return name + field
+		})
 		if err != nil {
 			return fmt.Errorf("rich media %q: %w", m.ID, err)
 		}
-		object["media"] = value
 		items = append(items, map[string]any{"id": m.ID, "media": object})
 	}
 	rich["media"] = items

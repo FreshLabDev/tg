@@ -145,9 +145,18 @@ type Message struct {
 	// sends into a thread should check this first.
 	IsTopicMessage bool `json:"is_topic_message,omitempty"`
 	// From is absent on channel posts, so it is a pointer.
-	From            *User           `json:"from,omitempty"`
-	ReceiverUser    *User           `json:"receiver_user,omitempty"`
-	Chat            Chat            `json:"chat"`
+	From *User `json:"from,omitempty"`
+	// SenderChat is set when a chat sent the message as itself: a channel's
+	// post, the post a linked channel forwards into its discussion group, or
+	// a message of an anonymous group administrator, where it is the group.
+	// Outside a channel From then holds a placeholder user, so a bot that
+	// tells who wrote a message looks here first.
+	SenderChat   *Chat `json:"sender_chat,omitempty"`
+	ReceiverUser *User `json:"receiver_user,omitempty"`
+	Chat         Chat  `json:"chat"`
+	// ForwardOrigin is set on a forwarded message: who wrote the original,
+	// and when. It is nil on a message that is not a forward.
+	ForwardOrigin   *MessageOrigin  `json:"forward_origin,omitempty"`
 	Date            int64           `json:"date"`
 	Text            string          `json:"text,omitempty"`
 	Entities        []MessageEntity `json:"entities,omitempty"`

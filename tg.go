@@ -28,3 +28,17 @@ package tg
 // CI compares with Telegram's published version to notice that the module has
 // fallen behind, and what a bot can report in its own build info.
 const BotAPI = "10.3"
+
+// Upload limits, in bytes. Telegram's own server takes an upload of up to 50
+// MB. A server started with --local takes a file of up to 2000 MB, which is
+// Telegram's limit for an account without Premium: 4000 parts of 512 KB.
+// Both megabytes are binary.
+//
+// A --local server lets a larger file through and Telegram refuses it only
+// once the whole of it has been uploaded, so a bot checks the size before it
+// sends. A photo, a thumbnail and a live photo have tighter limits of their
+// own.
+const (
+	MaxCloudUploadBytes = 50 << 20
+	MaxLocalUploadBytes = 2000 << 20
+)

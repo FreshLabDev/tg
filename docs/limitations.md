@@ -14,7 +14,8 @@ reading the source.
   instead of bytes.
 - **`sendVoice` and `sendVideoNote` have no method.**
   `probeSafe` accepts `sendVoice`, so a bot can assert it exists on the server
-  and still have to reach it through `Call`.
+  and still have to reach it through `CallMultipart`, which carries the file
+  but returns the result untyped.
 - **`Probe` cannot be extended by a caller.** The safe list is unexported, and
   `Probe` refuses anything outside it. `Call` exists so a bot is never blocked
   on a release for a missing method; `Probe` has no equivalent, so naming a new

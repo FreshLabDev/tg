@@ -60,6 +60,7 @@ var probeSafe = map[string]bool{
 	"sendAudio":                       true,
 	"sendChatAction":                  true,
 	"sendDocument":                    true,
+	"sendLivePhoto":                   true,
 	"sendMediaGroup":                  true,
 	"sendMessage":                     true,
 	"sendMessageDraft":                true,

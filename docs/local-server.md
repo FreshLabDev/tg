@@ -62,6 +62,31 @@ _, err := c.Preflight(ctx, tg.Needs{Files: true})
 `Preflight` with `Files: true` checks the mount at startup instead of letting
 the first voice message discover it.
 
+## Sending a file by path
+
+`InputFileLocal{Path: p}` hands the server a path instead of the bytes. The
+path is the server's, not the bot's: the server opens it on its own
+filesystem, so the file has to be on a volume both containers see. The client
+sends it as a `file://` URI, percent-encoded, and the server decodes it back,
+so spaces, `#` and `%` in a name are safe.
+
+Three things differ from an upload:
+
+- **The answer is slow.** The server answers only after it has read the file
+  and passed it on to Telegram, minutes for a large video. `WithUploadTimeout`
+  gives such calls their own deadline; text sends keep `WithTimeout`. When
+  the deadline passes, the file may still arrive: `OutcomeUnknown` is true,
+  and a bot that sends again may post it twice.
+- **The limit is `MaxLocalUploadBytes`**, 2000 MiB. The server lets a file
+  of up to 4000 MiB through and Telegram refuses it after the upload, so
+  check the size first.
+- **A thumbnail is still an upload.** Telegram wants the JPEG bytes, so
+  `Thumbnail` is an `*InputFileUpload` and goes as a multipart part even when
+  the video beside it goes by path.
+
+`IsLocalFileUnreadable` reports the server's refusals of a path it could not
+open: missing, not a regular file, empty, or unreadable for its uid.
+
 ## The server pins your Bot API version
 
 The cloud endpoint is always current. A self-hosted one is exactly as current

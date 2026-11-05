@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"strconv"
 )
@@ -24,10 +25,20 @@ import (
 
 // InputFile is the file a send method attaches.
 type InputFile interface {
-	// resolve reports how the file travels to c. Either value is the parameter
-	// Telegram reads, or data is the bytes to upload under filename -- never
-	// both.
-	resolve(c *Client) (value, filename string, data io.Reader, err error)
+	// resolve reports how the file travels to c.
+	resolve(c *Client) (resolvedFile, error)
+}
+
+// resolvedFile is how one file travels: as a parameter Telegram reads, or as
+// bytes uploaded under a filename -- never both.
+type resolvedFile struct {
+	// value is the parameter: a file_id, a URL or a file:// URI.
+	value string
+	// local marks a file:// URI. The server reads that file before it
+	// answers, so the call takes as long as an upload would.
+	local    bool
+	filename string
+	data     io.Reader
 }
 
 // InputFileString is a file Telegram can find on its own: a file_id it already
@@ -37,11 +48,11 @@ type InputFileString struct {
 	Data string
 }
 
-func (f InputFileString) resolve(*Client) (string, string, io.Reader, error) {
+func (f InputFileString) resolve(*Client) (resolvedFile, error) {
 	if f.Data == "" {
-		return "", "", nil, fmt.Errorf("empty file identifier")
+		return resolvedFile{}, fmt.Errorf("empty file identifier")
 	}
-	return f.Data, "", nil, nil
+	return resolvedFile{value: f.Data}, nil
 }
 
 // InputFileLocal names a file on the disk of a Bot API server started with
@@ -52,18 +63,23 @@ func (f InputFileString) resolve(*Client) (string, string, io.Reader, error) {
 // check that it exists; what this package can check is that the client is
 // pointed at a self-hosted server at all, because Telegram's own endpoint has
 // no access to any disk.
+//
+// The path travels as a file:// URI, percent-encoded, which the server decodes
+// back: a space, "#", "?" or "%" in a file name reaches it as it is on disk.
+// The name Telegram records is the last element of the path.
 type InputFileLocal struct {
 	Path string
 }
 
-func (f InputFileLocal) resolve(c *Client) (string, string, io.Reader, error) {
+func (f InputFileLocal) resolve(c *Client) (resolvedFile, error) {
 	if !c.IsLocalServer() {
-		return "", "", nil, fmt.Errorf("a local file path can only be sent to a self-hosted Bot API server; this client talks to %s", c.apiBase)
+		return resolvedFile{}, fmt.Errorf("a local file path can only be sent to a self-hosted Bot API server; this client talks to %s", c.apiBase)
 	}
 	if !filepath.IsAbs(f.Path) {
-		return "", "", nil, fmt.Errorf("local file path %q must be absolute: it is resolved on the server, where this process's working directory means nothing", f.Path)
+		return resolvedFile{}, fmt.Errorf("local file path %q must be absolute: it is resolved on the server, where this process's working directory means nothing", f.Path)
 	}
-	return "file://" + f.Path, "", nil, nil
+	uri := (&url.URL{Scheme: "file", Path: f.Path}).String()
+	return resolvedFile{value: uri, local: true}, nil
 }
 
 // InputFileUpload sends bytes with the request. Data is read once, into the
@@ -76,22 +92,36 @@ type InputFileUpload struct {
 	Data     io.Reader
 }
 
-func (f InputFileUpload) resolve(*Client) (string, string, io.Reader, error) {
+func (f InputFileUpload) resolve(*Client) (resolvedFile, error) {
 	if f.Data == nil {
-		return "", "", nil, fmt.Errorf("upload has no data")
+		return resolvedFile{}, fmt.Errorf("upload has no data")
 	}
 	name := f.Filename
 	if name == "" {
 		name = "file"
 	}
-	return "", name, f.Data, nil
+	return resolvedFile{filename: name, data: f.Data}, nil
 }
 
-// attachment is one file carried by a multipart request.
+// attachment is one file a request carries. With data it is a part of the
+// multipart body. Without, it is a path on a --local server that travels in a
+// field: it needs no part, but the server reads the file before it answers,
+// which is what [WithUploadTimeout] is for.
 type attachment struct {
 	field    string
 	filename string
 	data     io.Reader
+}
+
+// uploads reports whether any file is carried as bytes, which is what makes a
+// request multipart.
+func uploads(files []attachment) bool {
+	for _, f := range files {
+		if f.data != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // attachTop resolves a top-level file parameter such as sendPhoto's "photo".
@@ -102,34 +132,52 @@ func (c *Client) attachTop(fields map[string]any, files *[]attachment, param str
 	if file == nil {
 		return fmt.Errorf("%s requires a file", param)
 	}
-	value, filename, data, err := file.resolve(c)
+	resolved, err := file.resolve(c)
 	if err != nil {
 		return fmt.Errorf("%s: %w", param, err)
 	}
-	if data != nil {
-		*files = append(*files, attachment{field: param, filename: filename, data: data})
-		return nil
+	if resolved.data != nil || resolved.local {
+		*files = append(*files, attachment{field: param, filename: resolved.filename, data: resolved.data})
 	}
-	fields[param] = value
+	if resolved.data == nil {
+		fields[param] = resolved.value
+	}
 	return nil
 }
 
-// attachInner is attachTop for a file inside an InputMedia, where an upload
-// cannot be the parameter itself: the object's "media" field carries an
-// attach:// reference to a part named separately.
+// attachInner is attachTop for a file that cannot be the parameter itself: a
+// file inside an InputMedia, or a second file such as a cover. Its field
+// carries an attach:// reference to a part named separately.
 func (c *Client) attachInner(files *[]attachment, name string, file InputFile) (string, error) {
 	if file == nil {
 		return "", fmt.Errorf("media item requires a file")
 	}
-	value, filename, data, err := file.resolve(c)
+	resolved, err := file.resolve(c)
 	if err != nil {
 		return "", err
 	}
-	if data != nil {
-		*files = append(*files, attachment{field: name, filename: filename, data: data})
+	switch {
+	case resolved.data != nil:
+		*files = append(*files, attachment{field: name, filename: resolved.filename, data: resolved.data})
 		return "attach://" + name, nil
+	case resolved.local:
+		*files = append(*files, attachment{field: name})
 	}
-	return value, nil
+	return resolved.value, nil
+}
+
+// attachThumbnail puts a thumbnail in a top-level "thumbnail" field. Telegram
+// takes a thumbnail only as a new upload, so it is always a part of its own.
+func (c *Client) attachThumbnail(fields map[string]any, files *[]attachment, thumbnail *InputFileUpload) error {
+	if thumbnail == nil {
+		return nil
+	}
+	value, err := c.attachInner(files, "thumbnail", *thumbnail)
+	if err != nil {
+		return fmt.Errorf("thumbnail: %w", err)
+	}
+	fields["thumbnail"] = value
+	return nil
 }
 
 // CaptionOptions are the parameters every captioned send shares. The caption
@@ -176,6 +224,12 @@ type VideoOptions struct {
 	// ShowCaptionAboveMedia puts the caption over the video instead of under
 	// it.
 	ShowCaptionAboveMedia bool
+	// Thumbnail is the small picture a client shows in place of the file
+	// until it has loaded: a JPEG under 200 KB, at most 320 pixels a side.
+	// Telegram takes a thumbnail only as a new upload, never by file_id, so
+	// it is bytes even when the file itself is a path on a --local server,
+	// and it travels as a part of its own. Nil leaves it to Telegram.
+	Thumbnail *InputFileUpload
 }
 
 // AnimationOptions carries what Telegram cannot learn from a file it did not
@@ -198,6 +252,9 @@ type AudioOptions struct {
 	Duration  int
 	Performer string
 	Title     string
+	// Thumbnail is the album cover a client shows next to the track, as
+	// [VideoOptions.Thumbnail] describes it.
+	Thumbnail *InputFileUpload
 }
 
 type DocumentOptions struct {
@@ -206,6 +263,20 @@ type DocumentOptions struct {
 	// into a photo or a video, which is the whole point of sending one as a
 	// document.
 	DisableContentTypeDetection bool
+	// Thumbnail is the picture a client shows for the file, as
+	// [VideoOptions.Thumbnail] describes it.
+	Thumbnail *InputFileUpload
+}
+
+// LivePhotoOptions carries the placement and spoiler of a live photo besides
+// what every captioned send shares.
+type LivePhotoOptions struct {
+	CaptionOptions
+	// ShowCaptionAboveMedia puts the caption over the photo instead of under
+	// it.
+	ShowCaptionAboveMedia bool
+	// HasSpoiler hides the live photo under a spoiler until the user taps it.
+	HasSpoiler bool
 }
 
 func mediaFields(chatID int64, opts CaptionOptions) map[string]any {
@@ -287,7 +358,31 @@ func (c *Client) SendVideo(ctx context.Context, chatID int64, video InputFile, o
 		}
 		fields["cover"] = cover
 	}
+	if err := c.attachThumbnail(fields, &files, opts.Thumbnail); err != nil {
+		return Message{}, err
+	}
 	return c.sendMedia(ctx, "sendVideo", fields, files)
+}
+
+// SendLivePhoto sends a live photo: a short video and the still a client shows
+// until it plays. Telegram takes a video of at most 10 seconds and 10 MB, and
+// fetches neither file from a URL, so each is a file_id, a path on a --local
+// server or an upload; two uploads travel as two parts of one request.
+//
+// The returned message holds the files in LivePhoto, and the still's sizes in
+// Photo as well, which Telegram fills for backward compatibility.
+// LivePhoto.FileID is the video to keep and to send again.
+func (c *Client) SendLivePhoto(ctx context.Context, chatID int64, livePhoto, photo InputFile, opts LivePhotoOptions) (Message, error) {
+	fields := mediaFields(chatID, opts.CaptionOptions)
+	captionPlacement(fields, opts.ShowCaptionAboveMedia, opts.HasSpoiler)
+	var files []attachment
+	if err := c.attachTop(fields, &files, "live_photo", livePhoto); err != nil {
+		return Message{}, err
+	}
+	if err := c.attachTop(fields, &files, "photo", photo); err != nil {
+		return Message{}, err
+	}
+	return c.sendMedia(ctx, "sendLivePhoto", fields, files)
 }
 
 // SendAnimation sends a GIF, or an H.264/MPEG-4 AVC video without sound, which
@@ -335,6 +430,9 @@ func (c *Client) SendAudio(ctx context.Context, chatID int64, audio InputFile, o
 	if err := c.attachTop(fields, &files, "audio", audio); err != nil {
 		return Message{}, err
 	}
+	if err := c.attachThumbnail(fields, &files, opts.Thumbnail); err != nil {
+		return Message{}, err
+	}
 	return c.sendMedia(ctx, "sendAudio", fields, files)
 }
 
@@ -347,16 +445,58 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, document InputF
 	if err := c.attachTop(fields, &files, "document", document); err != nil {
 		return Message{}, err
 	}
+	if err := c.attachThumbnail(fields, &files, opts.Thumbnail); err != nil {
+		return Message{}, err
+	}
 	return c.sendMedia(ctx, "sendDocument", fields, files)
 }
 
 // InputMedia is one item of a media group, or the replacement in
 // [Client.EditMessageMedia].
 type InputMedia interface {
-	// item returns the object without its "media" field, which the caller
-	// fills in once it knows whether the file is uploaded or named.
-	item() (map[string]any, InputFile)
+	// item returns the object without its file fields, and the files that
+	// fill them: "media" always, then whichever of "cover", "thumbnail" and
+	// "photo" the item carries. The caller fills each field once it knows
+	// whether its file is uploaded or named.
+	item() (map[string]any, []mediaFile)
 }
+
+// mediaFile is a file an InputMedia carries in one of its fields.
+type mediaFile struct {
+	field string
+	file  InputFile
+}
+
+// withThumbnail adds a thumbnail to an item's files when it has one. The
+// pointer is checked here: a nil *InputFileUpload stored in an InputFile
+// would not compare equal to nil.
+func withThumbnail(files []mediaFile, thumbnail *InputFileUpload) []mediaFile {
+	if thumbnail == nil {
+		return files
+	}
+	return append(files, mediaFile{"thumbnail", *thumbnail})
+}
+
+// attachMedia turns an InputMedia into the object Telegram reads. Each file
+// fills the field it belongs to: a file_id, a URL or a path as itself, an
+// upload as an attach:// reference to a part of its own, named part(field).
+func (c *Client) attachMedia(files *[]attachment, media InputMedia, part func(field string) string) (map[string]any, error) {
+	object, carried := media.item()
+	for _, f := range carried {
+		value, err := c.attachInner(files, part(f.field), f.file)
+		if err != nil {
+			if f.field == "media" {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%s: %w", f.field, err)
+		}
+		object[f.field] = value
+	}
+	return object, nil
+}
+
+// sameName names a part after its field, for a request that carries one item.
+func sameName(field string) string { return field }
 
 // InputMediaPhoto is a photo. The caption is HTML, like every other text this
 // package sends.
@@ -369,10 +509,30 @@ type InputMediaPhoto struct {
 	HasSpoiler bool
 }
 
-func (m InputMediaPhoto) item() (map[string]any, InputFile) {
+func (m InputMediaPhoto) item() (map[string]any, []mediaFile) {
 	object := mediaItem("photo", m.Caption)
 	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
-	return object, m.Media
+	return object, []mediaFile{{"media", m.Media}}
+}
+
+// InputMediaLivePhoto is a live photo: Media is the video, of at most 10
+// seconds and 10 MB, and Photo the still a client shows until it plays.
+// Telegram fetches neither from a URL. In an album it groups with photos and
+// videos.
+type InputMediaLivePhoto struct {
+	Media   InputFile
+	Photo   InputFile
+	Caption string
+	// ShowCaptionAboveMedia puts the caption over the photo instead of under it.
+	ShowCaptionAboveMedia bool
+	// HasSpoiler hides the live photo under a spoiler until the user taps it.
+	HasSpoiler bool
+}
+
+func (m InputMediaLivePhoto) item() (map[string]any, []mediaFile) {
+	object := mediaItem("live_photo", m.Caption)
+	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
+	return object, []mediaFile{{"media", m.Media}, {"photo", m.Photo}}
 }
 
 type InputMediaVideo struct {
@@ -392,9 +552,12 @@ type InputMediaVideo struct {
 	ShowCaptionAboveMedia bool
 	// HasSpoiler hides the video under a spoiler until the user taps it.
 	HasSpoiler bool
+	// Thumbnail is the small picture shown until the video has loaded, as
+	// [VideoOptions.Thumbnail] describes it.
+	Thumbnail *InputFileUpload
 }
 
-func (m InputMediaVideo) item() (map[string]any, InputFile) {
+func (m InputMediaVideo) item() (map[string]any, []mediaFile) {
 	object := mediaItem("video", m.Caption)
 	if m.Width > 0 {
 		object["width"] = m.Width
@@ -412,29 +575,11 @@ func (m InputMediaVideo) item() (map[string]any, InputFile) {
 		object["start_timestamp"] = m.StartTimestamp
 	}
 	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
-	return object, m.Media
-}
-
-func (m InputMediaVideo) cover() InputFile { return m.Cover }
-
-// coveredMedia is an item that may carry a second file, its cover.
-type coveredMedia interface {
-	cover() InputFile
-}
-
-// attachCover puts the item's cover, when it has one, in the object's
-// "cover" field: an upload as a part of its own named name.
-func (c *Client) attachCover(files *[]attachment, object map[string]any, name string, media InputMedia) error {
-	covered, ok := media.(coveredMedia)
-	if !ok || covered.cover() == nil {
-		return nil
+	files := []mediaFile{{"media", m.Media}}
+	if m.Cover != nil {
+		files = append(files, mediaFile{"cover", m.Cover})
 	}
-	value, err := c.attachInner(files, name, covered.cover())
-	if err != nil {
-		return fmt.Errorf("cover: %w", err)
-	}
-	object["cover"] = value
-	return nil
+	return object, withThumbnail(files, m.Thumbnail)
 }
 
 // InputMediaAnimation is a GIF or an H.264/MPEG-4 AVC video without sound. In
@@ -450,7 +595,7 @@ type InputMediaAnimation struct {
 	HasSpoiler            bool
 }
 
-func (m InputMediaAnimation) item() (map[string]any, InputFile) {
+func (m InputMediaAnimation) item() (map[string]any, []mediaFile) {
 	object := mediaItem("animation", m.Caption)
 	if m.Width > 0 {
 		object["width"] = m.Width
@@ -462,24 +607,57 @@ func (m InputMediaAnimation) item() (map[string]any, InputFile) {
 		object["duration"] = m.Duration
 	}
 	captionPlacement(object, m.ShowCaptionAboveMedia, m.HasSpoiler)
-	return object, m.Media
+	return object, []mediaFile{{"media", m.Media}}
 }
 
+// InputMediaDocument is a file sent as a document. An album holds documents
+// only with other documents.
 type InputMediaDocument struct {
 	Media                       InputFile
 	Caption                     string
 	DisableContentTypeDetection bool
+	// Thumbnail is the picture a client shows for the file, as
+	// [VideoOptions.Thumbnail] describes it.
+	Thumbnail *InputFileUpload
 }
 
-func (m InputMediaDocument) item() (map[string]any, InputFile) {
+func (m InputMediaDocument) item() (map[string]any, []mediaFile) {
 	object := mediaItem("document", m.Caption)
 	if m.DisableContentTypeDetection {
 		object["disable_content_type_detection"] = true
 	}
-	return object, m.Media
+	return object, withThumbnail([]mediaFile{{"media", m.Media}}, m.Thumbnail)
 }
 
-// captionPlacement adds the two flags a photo, a video and an animation share.
+// InputMediaAudio is a music file. An album holds audio only with other
+// audio, and [Client.EditMessageMedia] can turn a message into one.
+type InputMediaAudio struct {
+	Media     InputFile
+	Caption   string
+	Duration  int
+	Performer string
+	Title     string
+	// Thumbnail is the album cover a client shows next to the track, as
+	// [VideoOptions.Thumbnail] describes it.
+	Thumbnail *InputFileUpload
+}
+
+func (m InputMediaAudio) item() (map[string]any, []mediaFile) {
+	object := mediaItem("audio", m.Caption)
+	if m.Duration > 0 {
+		object["duration"] = m.Duration
+	}
+	if m.Performer != "" {
+		object["performer"] = m.Performer
+	}
+	if m.Title != "" {
+		object["title"] = m.Title
+	}
+	return object, withThumbnail([]mediaFile{{"media", m.Media}}, m.Thumbnail)
+}
+
+// captionPlacement adds the two flags a photo, a live photo, a video and an
+// animation share.
 func captionPlacement(object map[string]any, above, spoiler bool) {
 	if above {
 		object["show_caption_above_media"] = true
@@ -498,37 +676,70 @@ func mediaItem(kind, caption string) map[string]any {
 	return object
 }
 
+// MediaGroupOptions are the parameters of [Client.SendMediaGroup] besides the
+// items. An album has no caption of its own, each item carries one, and no
+// keyboard: Telegram allows none.
+type MediaGroupOptions struct {
+	// ThreadID posts into a forum topic; zero stays in the chat's main thread.
+	ThreadID int
+	// ReplyTo answers a message with the whole album; zero sends a standalone
+	// one. An original deleted in the meantime does not fail the send: the
+	// album arrives without the quote, as every reply here does.
+	ReplyTo int64
+	// DisableNotification sends the album silently.
+	DisableNotification bool
+	// ProtectContent keeps the album from being forwarded and saved.
+	ProtectContent bool
+	// MessageEffectID is the effect played as the album arrives. Telegram
+	// takes it in private chats only.
+	MessageEffectID string
+}
+
 // SendMediaGroup posts an album: one message group, delivered atomically, that
-// clients render as a single tile of up to ten items. A group carries no
-// keyboard of its own -- Telegram allows none -- so an action button has to
-// live on a separate message.
-func (c *Client) SendMediaGroup(ctx context.Context, chatID int64, media []InputMedia, threadID int) ([]Message, error) {
+// clients render as a single tile of two to ten items. Photos, live photos and
+// videos mix freely; documents group only with documents and audio only with
+// audio, and an animation cannot be in an album at all, so such an album is
+// refused before sending. A group carries no keyboard of its own -- Telegram
+// allows none -- so an action button has to live on a separate message.
+//
+// Each item's files go the way that item's fields say: a file_id, a URL or a
+// path as itself, an upload as a part of its own. Uploads for the whole album
+// travel in one request.
+func (c *Client) SendMediaGroup(ctx context.Context, chatID int64, media []InputMedia, opts MediaGroupOptions) ([]Message, error) {
 	if len(media) == 0 {
 		return nil, fmt.Errorf("sendMediaGroup requires at least one item")
 	}
-	fields := map[string]any{"chat_id": chatID}
-	if threadID > 0 {
-		fields["message_thread_id"] = threadID
-	}
+	fields := mediaFields(chatID, CaptionOptions{
+		ThreadID:            opts.ThreadID,
+		ReplyTo:             opts.ReplyTo,
+		DisableNotification: opts.DisableNotification,
+		ProtectContent:      opts.ProtectContent,
+		MessageEffectID:     opts.MessageEffectID,
+	})
 	var files []attachment
 	items := make([]map[string]any, 0, len(media))
+	kinds := map[string]bool{}
 	for i, entry := range media {
-		switch entry.(type) {
-		case InputMediaAnimation, *InputMediaAnimation:
-			return nil, fmt.Errorf("media[%d]: an animation cannot be part of an album; send it with SendAnimation", i)
+		if entry == nil {
+			return nil, fmt.Errorf("media[%d]: media item requires a file", i)
 		}
-		object, file := entry.item()
-		// The attach name only has to be unique within this request; the index
-		// makes it so and makes a captured request readable.
-		value, err := c.attachInner(&files, "media"+strconv.Itoa(i), file)
+		// A part name only has to be unique within this request; the index
+		// makes it so and makes a captured request readable: media0, cover0,
+		// thumbnail0, photo0.
+		index := strconv.Itoa(i)
+		object, err := c.attachMedia(&files, entry, func(field string) string { return field + index })
 		if err != nil {
 			return nil, fmt.Errorf("media[%d]: %w", i, err)
 		}
-		object["media"] = value
-		if err := c.attachCover(&files, object, "cover"+strconv.Itoa(i), entry); err != nil {
-			return nil, fmt.Errorf("media[%d]: %w", i, err)
+		kind, _ := object["type"].(string)
+		if kind == "animation" {
+			return nil, fmt.Errorf("media[%d]: an animation cannot be part of an album; send it with SendAnimation", i)
 		}
+		kinds[kind] = true
 		items = append(items, object)
+	}
+	if (kinds["audio"] || kinds["document"]) && len(kinds) > 1 {
+		return nil, fmt.Errorf("sendMediaGroup groups documents only with documents and audio only with audio")
 	}
 	fields["media"] = items
 	var resp struct {
@@ -565,10 +776,10 @@ func (c *Client) EditMessageMedia(ctx context.Context, chatID, messageID int64, 
 
 // EditMessageMediaMessage is [Client.EditMessageMedia] that also returns the
 // edited message, which is where Telegram reports the file_id of a file the
-// edit uploaded: in Photo, Video, Animation or Document, whichever the new media
-// is. The caption goes with the media in the same call, as HTML, with the
-// placement and spoiler options on [InputMediaPhoto], [InputMediaVideo] and
-// [InputMediaAnimation].
+// edit uploaded: in Photo, Video, Animation, Audio, Document or LivePhoto,
+// whichever the new media is. The caption goes with the media in the same
+// call, as HTML, with the placement and spoiler options on [InputMediaPhoto],
+// [InputMediaLivePhoto], [InputMediaVideo] and [InputMediaAnimation].
 //
 // A "message is not modified" answer is returned as the error, unlike
 // [Client.EditMessageMedia]: there is no message to return, and a zero Message
@@ -596,14 +807,9 @@ func (c *Client) editMessageMedia(ctx context.Context, chatID, messageID int64, 
 		return fmt.Errorf("editMessageMedia requires media")
 	}
 	fields := map[string]any{"chat_id": chatID, "message_id": messageID}
-	object, file := media.item()
 	var files []attachment
-	value, err := c.attachInner(&files, "media", file)
+	object, err := c.attachMedia(&files, media, sameName)
 	if err != nil {
-		return err
-	}
-	object["media"] = value
-	if err := c.attachCover(&files, object, "cover", media); err != nil {
 		return err
 	}
 	fields["media"] = object
@@ -696,9 +902,17 @@ func (c *Client) sendMedia(ctx context.Context, method string, fields map[string
 // submit sends a request that may or may not carry files. JSON is preferred
 // whenever nothing is uploaded: it is cheaper, and it is the only body a
 // parameterless call can send without upsetting a self-hosted server.
+//
+// A request that carries any file, uploaded or named by a path on a --local
+// server, gets the upload timeout: the server answers only once it has the
+// whole file and has passed it on to Telegram.
 func (c *Client) submit(ctx context.Context, method string, fields map[string]any, files []attachment, out any) error {
-	if len(files) == 0 {
-		return c.post(ctx, method, fields, out)
+	timeout := c.timeout
+	if len(files) > 0 && c.uploadTimeout > 0 {
+		timeout = c.uploadTimeout
 	}
-	return c.postMultipart(ctx, method, fields, files, out)
+	if !uploads(files) {
+		return c.postJSON(ctx, method, fields, out, timeout)
+	}
+	return c.postMultipart(ctx, method, fields, files, out, timeout)
 }

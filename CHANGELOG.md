@@ -54,6 +54,85 @@ Use this section for changes that are merged but not released yet.
   uploaded cover goes as a multipart part of its own, in `SendMediaGroup`
   and in `EditMessageMedia`. framy sends the videos of one press on its
   site as one album, each with the frame its result card shows.
+- **An upload timeout of its own.** `WithUploadTimeout` sets the deadline
+  for a call that carries a file: an upload, or a path on a `--local`
+  server, which answers only after it has passed the file on to Telegram.
+  Text sends and sends by file_id or URL keep `WithTimeout`. vido waits up
+  to ten minutes for a video and still gives up on a text in seconds.
+- **`OutcomeUnknown(err)`** says whether a failed call may have taken
+  effect, so a second send could post the message twice: a 5xx, an answer
+  that could not be read, or a connection lost after the whole request went
+  out. A refusal, a 429, a host that did not resolve, a refused connection
+  and an upload cut off halfway are known to have done nothing. The client
+  learns how far a request got from `httptrace`, so it needs no guess from
+  the error text.
+- **`CallMultipart`** calls a method with no typed wrapper and files in it:
+  `sendVoice`, `sendVideoNote`, `setChatPhoto`. Each file is an
+  `InputFile`, as in the typed sends; a nested field names an upload as
+  `attach://<name>`. A call with nothing to upload goes as JSON.
+- **Thumbnails.** `VideoOptions`, `AudioOptions` and `DocumentOptions`
+  gained `Thumbnail`, and so did `InputMediaVideo` and `InputMediaDocument`.
+  A thumbnail is always an upload (`*InputFileUpload`, JPEG under 200 KB,
+  at most 320 px), sent as a part of its own even on a `--local` server,
+  where the file itself goes by path.
+- **Audio in albums.** `InputMediaAudio` carries `Duration`, `Performer`,
+  `Title` and `Thumbnail`, for `SendMediaGroup` and the media edits.
+- **Live photos.** `SendLivePhoto(ctx, chatID, livePhoto, photo, opts)` sends
+  the video (at most 10 s and 10 MB) and its still in one message, and
+  `InputMediaLivePhoto` puts one in an album. Telegram takes neither by URL.
+  `Needs.Methods` accepts `sendLivePhoto`.
+- **Album options.** `MediaGroupOptions` carries the topic, a reply to a
+  message, silent sending, protected content and a message effect; see
+  Breaking. `SendMediaGroup` now also refuses an album that mixes
+  documents or audio with anything else before sending, as Telegram would
+  after the upload.
+- **`InlineQueryResultCachedAudio`** answers an inline query with a music
+  file Telegram already has.
+- **`Message.SenderChat` and `Message.ForwardOrigin`**: the channel or
+  group a message was sent on behalf of, and where a forwarded message came
+  from.
+- **UTF-16 offsets.** `UTF16Len(s)` measures text the way Telegram counts
+  entity offsets, and `EntityText(text, e)` cuts an entity out of a message.
+  Byte and rune indexes go wrong after the first emoji outside the BMP.
+- **Error classifiers.** `IsMessageGone` (the message to edit or delete is
+  gone, or can no longer be changed), `IsInvalidFileID` (a file_id or URL
+  Telegram cannot use), `IsCantParseEntities`, `IsCaptionTooLong` and
+  `IsLocalFileUnreadable` (a `--local` server could not read the path).
+  Each reads a 400 only, by the description the Bot API server sends.
+- **Upload limits.** `MaxCloudUploadBytes` (50 MiB) and
+  `MaxLocalUploadBytes` (2000 MiB), so a bot can refuse a file before it
+  spends minutes uploading it.
+
+### Changed
+
+- **A long `Retry-After` comes back to the caller.** A 429 that asks for
+  more than 60 seconds is returned at once, with `RetryAfter(err)` saying
+  how long, instead of holding the call for up to an hour. Before, the
+  client slept whatever Telegram asked. `WithMaxRetryAfter` moves the
+  ceiling; a bot that wants the old behaviour sets it high.
+- **A local path is percent-encoded.** `InputFileLocal` sends
+  `file:///dir/a%20b.mp4`, and the server decodes it back. The server
+  decodes every path this way, so a name such as `100%25.mp4` used to reach
+  it as `100%.mp4`.
+
+### Fixed
+
+- **A video's cover reaches every media edit.** `EditInlineMessageMedia`,
+  `EditEphemeralMessageMedia` and the rich messages (`SendRich`,
+  `EditMessageRich`, `EditEphemeralMessageRich`) dropped
+  `InputMediaVideo.Cover` without a word. They send it now, an upload as a
+  part of its own; an inline message takes no upload, so there a cover is
+  a file_id or a URL.
+
+### Breaking
+
+- **`SendMediaGroup` takes `MediaGroupOptions`** instead of a thread id.
+  `SendMediaGroup(ctx, chatID, items, 0)` becomes
+  `SendMediaGroup(ctx, chatID, items, tg.MediaGroupOptions{})`, and
+  `SendMediaGroup(ctx, chatID, items, threadID)` becomes
+  `SendMediaGroup(ctx, chatID, items, tg.MediaGroupOptions{ThreadID: threadID})`.
+  searchy and framy call it and need this one-line change when they
+  upgrade.
 
 ## v0.2.0-alpha.3 - 2026-10-30
 

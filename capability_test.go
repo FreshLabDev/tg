@@ -451,3 +451,23 @@ func TestPreflightCanRequireTheMethodsAddedForFramy(t *testing.T) {
 		}
 	}
 }
+
+// sendLivePhoto reads the video first and answers "There is no live photo in
+// the request" to an empty body, so a bot that sends live photos can refuse to
+// start on a server older than Bot API 10.0.
+func TestPreflightCanRequireSendLivePhoto(t *testing.T) {
+	for known, wantMissing := range map[bool]bool{true: false, false: true} {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/getMe") {
+				_, _ = w.Write([]byte(`{"ok":true,"result":{"id":7,"username":"bot"}}`))
+				return
+			}
+			oldServer(map[string]bool{"sendLivePhoto": known})(w, r)
+		})
+		_, err := c.Preflight(context.Background(), Needs{Methods: []string{"sendLivePhoto"}})
+		var missing *MissingMethodsError
+		if got := errors.As(err, &missing); got != wantMissing {
+			t.Fatalf("server has it: %v; err = %v", known, err)
+		}
+	}
+}

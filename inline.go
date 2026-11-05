@@ -164,7 +164,8 @@ func (r InlineQueryResultMpeg4Gif) MarshalJSON() ([]byte, error) {
 }
 
 // The cached results send a file Telegram already has, by its file_id: a
-// photo, a video or an MPEG-4 animation the bot sent or received before.
+// photo, a video, an MPEG-4 animation or a music file the bot sent or received
+// before.
 // Nothing is fetched, so they never fail on an unreachable URL, and the
 // picker shows the file itself. A file_id is the bot's own: one another bot
 // got for the same file does not work here.
@@ -246,6 +247,28 @@ func (r InlineQueryResultCachedMpeg4Gif) MarshalJSON() ([]byte, error) {
 		ParseMode string `json:"parse_mode,omitempty"`
 		result
 	}{Type: "mpeg4_gif", ParseMode: captionParseMode(r.Caption), result: result(r)})
+}
+
+// InlineQueryResultCachedAudio sends a music file by its file_id. The picker
+// shows the track's own title and performer, so the card has none of its own.
+type InlineQueryResultCachedAudio struct {
+	ID          string `json:"id"`
+	AudioFileID string `json:"audio_file_id"`
+	// Caption is HTML and appears on the sent message.
+	Caption             string                `json:"caption,omitempty"`
+	ReplyMarkup         *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+	InputMessageContent InputMessageContent   `json:"input_message_content,omitempty"`
+}
+
+func (InlineQueryResultCachedAudio) inlineQueryResult() {}
+
+func (r InlineQueryResultCachedAudio) MarshalJSON() ([]byte, error) {
+	type result InlineQueryResultCachedAudio
+	return json.Marshal(struct {
+		Type      string `json:"type"`
+		ParseMode string `json:"parse_mode,omitempty"`
+		result
+	}{Type: "audio", ParseMode: captionParseMode(r.Caption), result: result(r)})
 }
 
 // InlineQueryResultArticle is a text card. It is what a bot answers with when
@@ -422,22 +445,20 @@ func (c *Client) EditInlineMessageTextWithPreview(ctx context.Context, inlineMes
 
 // EditInlineMessageMedia replaces the media of an inline message, which is
 // how an inline card turns into a result once it is ready. Telegram takes no
-// upload here, so the media is a file_id or a URL; an upload is refused
-// before anything is sent.
+// upload here, so the media and a video's cover are a file_id or a URL; an
+// upload, a thumbnail included, is refused before anything is sent.
 func (c *Client) EditInlineMessageMedia(ctx context.Context, inlineMessageID string, media InputMedia, markup *InlineKeyboardMarkup) error {
 	if media == nil {
 		return fmt.Errorf("editMessageMedia requires media")
 	}
-	object, file := media.item()
 	var files []attachment
-	value, err := c.attachInner(&files, "media", file)
+	object, err := c.attachMedia(&files, media, sameName)
 	if err != nil {
 		return err
 	}
-	if len(files) > 0 {
+	if uploads(files) {
 		return fmt.Errorf("editMessageMedia of an inline message takes a file_id or a URL, not an upload")
 	}
-	object["media"] = value
 	return c.editInline(ctx, "editMessageMedia", inlineMessageID, map[string]any{"media": object}, markup)
 }
 

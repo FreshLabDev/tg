@@ -204,3 +204,27 @@ func TestACallbackFromAnInlineMessageHasNoMessage(t *testing.T) {
 		t.Fatalf("own = %+v", own.Callback)
 	}
 }
+
+// A cached audio card carries no title of its own: the picker shows the
+// track's. Its caption declares HTML only when there is one.
+func TestACachedAudioResult(t *testing.T) {
+	for _, tc := range []struct {
+		result InlineQueryResultCachedAudio
+		want   string
+	}{
+		{InlineQueryResultCachedAudio{ID: "a", AudioFileID: "audio-id", Caption: "song"},
+			`{"type":"audio","parse_mode":"HTML","id":"a","audio_file_id":"audio-id","caption":"song"}`},
+		{InlineQueryResultCachedAudio{ID: "b", AudioFileID: "audio-id",
+			ReplyMarkup: &InlineKeyboardMarkup{InlineKeyboard: [][]InlineKeyboardButton{{{Text: "More", CallbackData: "more"}}}}},
+			`{"type":"audio","id":"b","audio_file_id":"audio-id","reply_markup":{"inline_keyboard":[[{"text":"More","callback_data":"more"}]]}}`},
+	} {
+		got, err := json.Marshal(tc.result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want {
+			t.Fatalf("marshaled\n%s\nwant\n%s", got, tc.want)
+		}
+	}
+	var _ InlineQueryResult = InlineQueryResultCachedAudio{}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -838,5 +839,43 @@ func TestPlainButtonsStayFreeOfTheNewActions(t *testing.T) {
 	}
 	if string(raw) != `{"text":"Next","callback_data":"next"}` {
 		t.Fatalf("button = %s", raw)
+	}
+}
+
+// A post a linked channel forwarded into its discussion group says who sent
+// it as a chat and where it came from.
+func TestMessageDecodesTheSenderChatAndTheForwardOrigin(t *testing.T) {
+	var u Update
+	raw := `{"update_id":1,"message":{"message_id":9,"date":2,
+		"from":{"id":777000,"is_bot":false,"first_name":"Telegram"},
+		"sender_chat":{"id":-1001,"type":"channel","title":"News","username":"news"},
+		"chat":{"id":-1002,"type":"supergroup","title":"News chat"},
+		"forward_origin":{"type":"channel","date":1,"chat":{"id":-1001,"type":"channel","title":"News"},"message_id":44,"author_signature":"Ann"},
+		"text":"hello"}}`
+	if err := json.Unmarshal([]byte(raw), &u); err != nil {
+		t.Fatal(err)
+	}
+	m := u.Message
+	if m.SenderChat == nil || m.SenderChat.ID != -1001 || m.SenderChat.Type != "channel" || m.SenderChat.Username != "news" {
+		t.Fatalf("sender_chat = %+v", m.SenderChat)
+	}
+	o := m.ForwardOrigin
+	if o == nil || o.Type != OriginChannel || o.Chat == nil || o.Chat.ID != -1001 || o.MessageID != 44 || o.AuthorSignature != "Ann" {
+		t.Fatalf("forward_origin = %+v", o)
+	}
+
+	var plain Message
+	if err := json.Unmarshal([]byte(`{"message_id":1,"date":1,"chat":{"id":1,"type":"private"},"text":"hi"}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.SenderChat != nil || plain.ForwardOrigin != nil {
+		t.Fatalf("a plain message = %+v", plain)
+	}
+	out, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "sender_chat") || strings.Contains(string(out), "forward_origin") {
+		t.Fatalf("marshaled = %s: absent fields must stay absent", out)
 	}
 }

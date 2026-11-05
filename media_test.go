@@ -223,7 +223,7 @@ func TestSendMediaGroupMixesIdentifiersAndUploads(t *testing.T) {
 	messages, err := c.SendMediaGroup(context.Background(), 42, []InputMedia{
 		InputMediaPhoto{Media: InputFileString{Data: "known-id"}, Caption: "first"},
 		InputMediaVideo{Media: InputFileUpload{Filename: "clip.mp4", Data: strings.NewReader("mp4")}, SupportsStreaming: true},
-	}, 5)
+	}, MediaGroupOptions{ThreadID: 5})
 	if err != nil {
 		t.Fatalf("SendMediaGroup: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestSendMediaGroupRefusesAnEmptyAlbum(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Error("an empty album must not reach the network")
 	})
-	if _, err := c.SendMediaGroup(context.Background(), 1, nil, 0); err == nil {
+	if _, err := c.SendMediaGroup(context.Background(), 1, nil, MediaGroupOptions{}); err == nil {
 		t.Fatal("want a refusal")
 	}
 }
@@ -638,7 +638,7 @@ func TestSendMediaGroupRefusesAnAnimation(t *testing.T) {
 		"value":   InputMediaAnimation{Media: InputFileString{Data: "id"}},
 		"pointer": &InputMediaAnimation{Media: InputFileString{Data: "id"}},
 	} {
-		_, err := c.SendMediaGroup(context.Background(), 1, []InputMedia{InputMediaPhoto{Media: InputFileString{Data: "p"}}, item}, 0)
+		_, err := c.SendMediaGroup(context.Background(), 1, []InputMedia{InputMediaPhoto{Media: InputFileString{Data: "p"}}, item}, MediaGroupOptions{})
 		if err == nil || !strings.Contains(err.Error(), "media[1]") {
 			t.Fatalf("%s: err = %v, want a refusal naming the item", name, err)
 		}
@@ -722,7 +722,7 @@ func TestAlbumItemsCarryTheirOwnSpoilerAndCaptionPlacement(t *testing.T) {
 	_, err := c.SendMediaGroup(context.Background(), 42, []InputMedia{
 		InputMediaPhoto{Media: InputFileString{Data: "p"}, Caption: "first", HasSpoiler: true},
 		InputMediaVideo{Media: InputFileUpload{Filename: "v.mp4", Data: strings.NewReader("mp4")}, ShowCaptionAboveMedia: true},
-	}, 0)
+	}, MediaGroupOptions{})
 	if err != nil {
 		t.Fatalf("SendMediaGroup: %v", err)
 	}
@@ -859,7 +859,7 @@ func TestAlbumVideosCarryTheirCovers(t *testing.T) {
 		InputMediaVideo{Media: InputFileUpload{Filename: "a.mp4", Data: strings.NewReader("mp4-a")},
 			Cover: InputFileUpload{Filename: "cover.jpg", Data: strings.NewReader("jpeg-a")}, StartTimestamp: 2},
 		InputMediaVideo{Media: InputFileUpload{Filename: "b.mp4", Data: strings.NewReader("mp4-b")}, Cover: InputFileString{Data: "AgACcover"}},
-	}, 0)
+	}, MediaGroupOptions{})
 	if err != nil {
 		t.Fatalf("SendMediaGroup: %v", err)
 	}

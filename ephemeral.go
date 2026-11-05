@@ -115,13 +115,11 @@ func (c *Client) EditEphemeralMessageMedia(ctx context.Context, chatID, receiver
 	if media == nil {
 		return fmt.Errorf("editEphemeralMessageMedia requires media")
 	}
-	object, file := media.item()
 	var files []attachment
-	value, err := c.attachInner(&files, "media", file)
+	object, err := c.attachMedia(&files, media, sameName)
 	if err != nil {
 		return err
 	}
-	object["media"] = value
 	return c.editEphemeralWith(ctx, "editEphemeralMessageMedia", chatID, receiverUserID, ephemeralMessageID, map[string]any{"media": object}, files, markup)
 }
 

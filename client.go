@@ -16,16 +16,23 @@ const DefaultAPIBase = "https://api.telegram.org"
 
 // Client talks to one bot's Bot API endpoint. It is safe for concurrent use.
 type Client struct {
-	token     string
-	apiBase   string
-	http      *http.Client
-	timeout   time.Duration
-	sleep     func(context.Context, time.Duration) error
-	log       *slog.Logger
-	observe   Observer
-	filesRoot string
-	allowed   []string
+	token         string
+	apiBase       string
+	http          *http.Client
+	timeout       time.Duration
+	uploadTimeout time.Duration
+	maxRetryAfter time.Duration
+	sleep         func(context.Context, time.Duration) error
+	log           *slog.Logger
+	observe       Observer
+	filesRoot     string
+	allowed       []string
 }
+
+// defaultMaxRetryAfter is the longest a call sleeps on a 429 by default. It is
+// what the family's bots settled on in their own loops: past a minute, a user
+// waiting on the answer is better told to try later than kept waiting.
+const defaultMaxRetryAfter = 60 * time.Second
 
 // Event describes one HTTP attempt against the Bot API, or one file download.
 // It carries no bot token and no response body, so it is safe to log or turn
@@ -102,6 +109,37 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithUploadTimeout sets the per-attempt deadline for a call that carries a
+// file: an upload, or a path on a --local server. Such a server answers only
+// after it has read the file and passed it on to Telegram, which for a large
+// video takes minutes, while the same client's text sends should still give up
+// in seconds. A file_id or a URL is no file in this sense: Telegram already
+// has it or fetches it itself. Zero keeps the ordinary timeout of
+// [WithTimeout].
+//
+// The caller's context still bounds the whole call, so a shorter deadline
+// there wins.
+func WithUploadTimeout(d time.Duration) Option {
+	return func(c *Client) {
+		if d > 0 {
+			c.uploadTimeout = d
+		}
+	}
+}
+
+// WithMaxRetryAfter bounds how long a call sleeps when Telegram answers 429
+// before it tries again. A longer retry_after comes back to the caller at
+// once, as the *APIError, with [RetryAfter] saying how long Telegram asked
+// for: a send does not hold its goroutine, and the user waiting on it, for an
+// hour. The default is 60 seconds; zero keeps it.
+func WithMaxRetryAfter(d time.Duration) Option {
+	return func(c *Client) {
+		if d > 0 {
+			c.maxRetryAfter = d
+		}
+	}
+}
+
 // WithLogger attaches a logger. The client logs nothing above debug level on
 // its own: errors are returned, not logged, so the caller decides.
 func WithLogger(log *slog.Logger) Option {
@@ -144,12 +182,13 @@ func WithLocalFiles(root string) Option {
 // at startup to find out whether the server on the other end can serve it.
 func New(token string, opts ...Option) *Client {
 	c := &Client{
-		token:   token,
-		apiBase: DefaultAPIBase,
-		http:    defaultHTTPClient(),
-		timeout: 30 * time.Second,
-		sleep:   sleep,
-		log:     slog.New(slog.DiscardHandler),
+		token:         token,
+		apiBase:       DefaultAPIBase,
+		http:          defaultHTTPClient(),
+		timeout:       30 * time.Second,
+		maxRetryAfter: defaultMaxRetryAfter,
+		sleep:         sleep,
+		log:           slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
 		opt(c)
