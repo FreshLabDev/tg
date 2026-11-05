@@ -13,6 +13,13 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.3.0-alpha.1 - 2026-11-05
+
+What vido 3.0.0 needs to send its media: an upload timeout of its own,
+thumbnails, live photos, audio in albums and album options. Also prepared
+inline messages, guest mode and rich messages with their own pictures. A bot
+that calls `SendMediaGroup` no longer compiles: see Breaking.
+
 ### Added
 
 - **Prepared inline messages.** `SavePreparedInlineMessage` saves a result
