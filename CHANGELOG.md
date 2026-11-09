@@ -13,6 +13,51 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+Bot API 10.4: widgets, and ephemeral replies to a button press without
+naming the receiver. `BotAPI` is now `"10.4"`. Nothing that compiled before
+stops compiling.
+
+### Added
+
+- **Widgets.** `SendWidget` sends an HTML widget with its state
+  (`PublicData`, `ChatData`), `AllowQueries` and `IsShared`;
+  `SendSharedWidget` sends a shared one again by its id.
+  `EditMessageWidgetData` and `EditInlineMessageWidgetData` change the state
+  of one message (a nil field stays, a pointer to `""` clears it),
+  `EditSharedWidgetData` the public state of a shared widget everywhere, with
+  its `cache_time`. `Update.WidgetQuery` and `Update.SharedWidgetQuery` are
+  the widget's requests, `AnswerWidgetQuery` answers them, and
+  `WidgetQueryType` says whether one is plain data, signed data or a TON
+  transaction the wallet reports as sent. `Message.Widget` and
+  `ExternalReplyInfo.Widget` carry a received widget. An empty or oversized
+  HTML and data over 1024 bytes are refused before sending;
+  `WidgetCompressedSize` estimates the 4096-byte compressed limit, which is
+  left to Telegram. In production a widget goes to a private chat only and
+  cannot be forwarded; `InputWidgetMessageContent` and
+  `InputSharedWidgetMessageContent` are for the test server until inline
+  widgets open. A bot that names its updates must add `widget_query` and
+  `shared_widget_query`.
+- **Ephemeral replies to a press.** `SendEphemeralReply` answers a button
+  press with a text only the presser sees, in a group, a DM or an inline
+  message's chat, with nothing but the callback query id. `Ephemeral` with
+  `CallbackQueryID` and no `ReceiverUserID` does the same for photos, videos,
+  animations, audio, documents and `SendRich`, and `SendEphemeralRichHTML`
+  takes a zero receiver. The chat id is then not sent, since Telegram
+  ignores it. An `Ephemeral` with neither a receiver nor a press is refused
+  before sending.
+- **Preflight** can require `sendWidget`, `sendSharedWidget`,
+  `editMessageWidgetData` and `answerWidgetQuery`, each checked against the
+  10.4 server source to fail on an empty body. `editSharedWidgetData` cannot
+  be probed: it passes an empty body on to TDLib.
+
+### Not modeled
+
+The rest of 10.4 is not used by any bot yet and is reachable through `Call`
+and `Message.Raw`: quotes from rich messages (`quote_rich_texts`), TON wallet
+cards in `ChatFullInfo` and `TonWalletTransfer`, chat share themes, gifts
+(`getUniqueGift`, `deleteBusinessAccountGift`), the `ton_address` rich text
+and entities, `paid_messages_waived`, and the verification descriptions.
+
 ## v0.3.0-alpha.1 - 2026-11-05
 
 What vido 3.0.0 needs to send its media: an upload timeout of its own,

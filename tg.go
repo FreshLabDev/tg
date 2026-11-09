@@ -27,7 +27,7 @@ package tg
 // BotAPI is the Bot API version this module is written against. It is what
 // CI compares with Telegram's published version to notice that the module has
 // fallen behind, and what a bot can report in its own build info.
-const BotAPI = "10.3"
+const BotAPI = "10.4"
 
 // Upload limits, in bytes. Telegram's own server takes an upload of up to 50
 // MB. A server started with --local takes a file of up to 2000 MB, which is

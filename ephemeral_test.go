@@ -254,3 +254,79 @@ func TestEphemeralEditsTreatNotModifiedAsSuccess(t *testing.T) {
 		t.Fatal("an edit without media was sent")
 	}
 }
+
+// Since 10.4 a press alone authorizes the reply: no receiver, and no chat_id,
+// which Telegram would ignore anyway and a bot answering an inline message
+// does not have.
+func TestAnEphemeralReplyToAPressNamesOnlyThePress(t *testing.T) {
+	handler, method, body := capture(t, `{"ok":true,"result":{"message_id":0,"ephemeral_message_id":3,"chat":{"id":-100,"type":"supergroup"},"date":1}}`)
+	c, _ := newTestClient(t, handler)
+	ctx := context.Background()
+
+	msg, err := c.SendEphemeralReply(ctx, "cb-1", "already answered", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.EphemeralMessageID != 3 || msg.Chat.ID != -100 {
+		t.Fatalf("message = %+v", msg)
+	}
+	params, _ := (*body)["ephemeral_message_parameters"].(map[string]any)
+	if *method != "sendMessage" || len(params) != 1 || params["callback_query_id"] != "cb-1" {
+		t.Fatalf("%s ephemeral_message_parameters = %v", *method, params)
+	}
+	if _, ok := (*body)["chat_id"]; ok {
+		t.Fatal("chat_id sent with a reply to a press")
+	}
+
+	*body = nil
+	if _, err := c.SendEphemeralRichHTML(ctx, 42, 0, "cb-2", "<b>x</b>", nil); err != nil {
+		t.Fatal(err)
+	}
+	params, _ = (*body)["ephemeral_message_parameters"].(map[string]any)
+	if _, ok := (*body)["chat_id"]; ok || len(params) != 1 || params["callback_query_id"] != "cb-2" {
+		t.Fatalf("rich: %v", *body)
+	}
+
+	*body = nil
+	if _, err := c.SendPhoto(ctx, 42, InputFileString{Data: "ph"}, CaptionOptions{Ephemeral: &Ephemeral{CallbackQueryID: "cb-3"}}); err != nil {
+		t.Fatal(err)
+	}
+	params, _ = (*body)["ephemeral_message_parameters"].(map[string]any)
+	if _, ok := (*body)["chat_id"]; ok || len(params) != 1 {
+		t.Fatalf("photo: %v", *body)
+	}
+
+	// A receiver named together with the press keeps the chat.
+	*body = nil
+	if _, err := c.SendEphemeralRichHTML(ctx, 42, 77, "cb-4", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if (*body)["chat_id"] != float64(42) {
+		t.Fatalf("with a receiver: %v", *body)
+	}
+}
+
+// Neither a receiver nor a press leaves Telegram nothing to deliver to.
+func TestAnEphemeralWithNobodyIsRefused(t *testing.T) {
+	sent := false
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		sent = true
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	})
+	ctx := context.Background()
+	if _, err := c.SendEphemeralReply(ctx, "", "x", nil); err == nil {
+		t.Error("reply without a press")
+	}
+	if _, err := c.SendEphemeralRichHTML(ctx, 42, 0, "", "x", nil); err == nil {
+		t.Error("rich without a receiver or a press")
+	}
+	if _, err := c.SendRich(ctx, 42, "x", RichOptions{Ephemeral: &Ephemeral{}}); err == nil {
+		t.Error("SendRich with an empty Ephemeral")
+	}
+	if _, err := c.SendPhoto(ctx, 42, InputFileString{Data: "ph"}, CaptionOptions{Ephemeral: &Ephemeral{}}); err == nil {
+		t.Error("SendPhoto with an empty Ephemeral")
+	}
+	if sent {
+		t.Fatal("a refused send reached Telegram")
+	}
+}

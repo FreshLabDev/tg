@@ -199,6 +199,10 @@ type Message struct {
 	// Document.
 	LivePhoto *LivePhoto `json:"live_photo,omitempty"`
 
+	// Widget is an HTML widget (Bot API 10.4); the caption, if any, is in
+	// Caption.
+	Widget *Widget `json:"widget,omitempty"`
+
 	// GuestQueryID is set on a [Update.GuestMessage]: the query
 	// [Client.AnswerGuestQuery] answers. Its Chat is where the bot was
 	// summoned, and the bot is not in it, so nothing else may be sent there.
@@ -291,6 +295,7 @@ type ExternalReplyInfo struct {
 	Video     *Video     `json:"video,omitempty"`
 	VideoNote *VideoNote `json:"video_note,omitempty"`
 	Voice     *Voice     `json:"voice,omitempty"`
+	Widget    *Widget    `json:"widget,omitempty"`
 	// HasMediaSpoiler is true when the media was hidden under a spoiler.
 	HasMediaSpoiler bool `json:"has_media_spoiler,omitempty"`
 }
@@ -411,6 +416,12 @@ type Update struct {
 	// on in BotFather, and only when "guest_message" is named in
 	// [WithAllowedUpdates] if the bot names any.
 	GuestMessage *Message `json:"guest_message,omitempty"`
+
+	// WidgetQuery and SharedWidgetQuery are requests from widgets (Bot API
+	// 10.4): from a message the bot sent, and from a forward of a shared
+	// widget. [Client.AnswerWidgetQuery] answers both.
+	WidgetQuery       *WidgetQuery       `json:"widget_query,omitempty"`
+	SharedWidgetQuery *SharedWidgetQuery `json:"shared_widget_query,omitempty"`
 }
 
 // LinkPreviewOptions controls Telegram's own preview of a link in a message.

@@ -280,7 +280,12 @@ type LivePhotoOptions struct {
 }
 
 func mediaFields(chatID int64, opts CaptionOptions) map[string]any {
-	req := map[string]any{"chat_id": chatID}
+	req := map[string]any{}
+	if !opts.Ephemeral.answersPress() {
+		// A reply to a press goes to whoever pressed, wherever the button
+		// was; Telegram ignores the chat id then.
+		req["chat_id"] = chatID
+	}
 	if opts.ThreadID > 0 {
 		req["message_thread_id"] = opts.ThreadID
 	}
@@ -907,6 +912,9 @@ func (c *Client) sendMedia(ctx context.Context, method string, fields map[string
 // server, gets the upload timeout: the server answers only once it has the
 // whole file and has passed it on to Telegram.
 func (c *Client) submit(ctx context.Context, method string, fields map[string]any, files []attachment, out any) error {
+	if p, ok := fields["ephemeral_message_parameters"].(map[string]any); ok && len(p) == 0 {
+		return fmt.Errorf("%s: an ephemeral message needs a receiver or the button press it answers", method)
+	}
 	timeout := c.timeout
 	if len(files) > 0 && c.uploadTimeout > 0 {
 		timeout = c.uploadTimeout

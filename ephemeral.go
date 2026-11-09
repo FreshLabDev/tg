@@ -15,6 +15,11 @@ import (
 //     message being answered, within a 15-second window, or the callback query
 //     of a tapped button. After that window a fresh ephemeral message is
 //     refused, so long work must edit a placeholder posted immediately.
+//   - Since 10.4 a button press alone is enough: with CallbackQueryID set and
+//     no receiver, the message is a reply to the press, seen only by whoever
+//     pressed, in any chat but a channel's direct messages. Telegram then
+//     ignores chat_id, and the bot need not be a member of the chat, so this
+//     also answers a press on an inline message.
 
 // Ephemeral addresses a send to one member of a group: SendPhoto,
 // SendAnimation, SendVideo, SendAudio and SendDocument take it in their
@@ -23,8 +28,13 @@ import (
 // in CallbackQueryID, or the incoming ephemeral message in
 // CaptionOptions.ReplyToEphemeral.
 type Ephemeral struct {
+	// ReceiverUserID is who sees the message. Zero, with CallbackQueryID set,
+	// makes the message a reply to the press, seen by whoever pressed (Bot API
+	// 10.4); the chat id of the send is then left out. Set together with
+	// CallbackQueryID, it must be the person who pressed.
 	ReceiverUserID int64
-	// CallbackQueryID is the button press the message answers.
+	// CallbackQueryID is the button press the message answers. The press
+	// still needs [Client.AnswerCallbackQuery], or its spinner keeps turning.
 	CallbackQueryID string
 	// ReplaceCallbackQueryMessage shows the message to the receiver in place
 	// of the one whose button was pressed; the others keep seeing that one. It
@@ -34,7 +44,10 @@ type Ephemeral struct {
 }
 
 func (e *Ephemeral) fields() map[string]any {
-	params := map[string]any{"receiver_user_id": e.ReceiverUserID}
+	params := map[string]any{}
+	if e.ReceiverUserID != 0 {
+		params["receiver_user_id"] = e.ReceiverUserID
+	}
 	if e.CallbackQueryID != "" {
 		params["callback_query_id"] = e.CallbackQueryID
 	}
@@ -42,6 +55,41 @@ func (e *Ephemeral) fields() map[string]any {
 		params["replace_callback_query_message"] = true
 	}
 	return params
+}
+
+// answersPress reports whether the send is a reply to a button press with no
+// receiver named, which is when Telegram ignores the chat id.
+func (e *Ephemeral) answersPress() bool {
+	return e != nil && e.ReceiverUserID == 0 && e.CallbackQueryID != ""
+}
+
+func (e *Ephemeral) check(method string) error {
+	if e != nil && e.ReceiverUserID == 0 && e.CallbackQueryID == "" {
+		return fmt.Errorf("%s: an ephemeral message needs a receiver or the button press it answers", method)
+	}
+	return nil
+}
+
+// SendEphemeralReply answers a button press with an HTML text only the person
+// who pressed sees (Bot API 10.4), in the chat of the button: a group, a DM
+// or wherever an inline message went, but not a channel's direct messages.
+// It is the "you have already answered" a toast is too short for, without a
+// word in the chat for everyone else. The press still needs
+// [Client.AnswerCallbackQuery].
+//
+// The returned message is ephemeral: the EditEphemeral methods change it,
+// with its Chat and the presser as the receiver.
+func (c *Client) SendEphemeralReply(ctx context.Context, callbackQueryID, text string, markup *InlineKeyboardMarkup) (Message, error) {
+	if callbackQueryID == "" {
+		return Message{}, fmt.Errorf("sendMessage: an ephemeral reply needs the button press it answers")
+	}
+	req := map[string]any{
+		"ephemeral_message_parameters": map[string]any{"callback_query_id": callbackQueryID},
+		"text":                         text,
+		"parse_mode":                   "HTML",
+		"link_preview_options":         noLinkPreview,
+	}
+	return c.sendMessage(ctx, req, markup)
 }
 
 // SendEphemeralMessage answers a message so that only receiverUserID sees it.
@@ -63,15 +111,20 @@ func (c *Client) SendEphemeralMessage(ctx context.Context, chatID, receiverUserI
 // callbackQueryID ties the overlay to the button tap that asked for it; the
 // public message stays in place because replace_callback_query_message is
 // omitted.
+//
+// A receiverUserID of zero with a callbackQueryID answers the press for
+// whoever pressed (Bot API 10.4), and chatID is not sent: Telegram ignores it.
 func (c *Client) SendEphemeralRichHTML(ctx context.Context, chatID, receiverUserID int64, callbackQueryID, body string, markup *InlineKeyboardMarkup, opts ...RichOption) (Message, error) {
-	ephemeral := map[string]any{"receiver_user_id": receiverUserID}
-	if callbackQueryID != "" {
-		ephemeral["callback_query_id"] = callbackQueryID
+	ephemeral := &Ephemeral{ReceiverUserID: receiverUserID, CallbackQueryID: callbackQueryID}
+	if err := ephemeral.check("sendRichMessage"); err != nil {
+		return Message{}, err
 	}
 	req := map[string]any{
-		"chat_id":                      chatID,
 		"rich_message":                 richHTML(body, opts...),
-		"ephemeral_message_parameters": ephemeral,
+		"ephemeral_message_parameters": ephemeral.fields(),
+	}
+	if !ephemeral.answersPress() {
+		req["chat_id"] = chatID
 	}
 	if markup != nil {
 		req["reply_markup"] = markup

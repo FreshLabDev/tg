@@ -35,10 +35,16 @@ import (
 // the description and setChatMenuButton resets the menu button. sendAnimation,
 // for one, answers "There is no animation in the request" before anything else,
 // deleteMessages "Message identifiers are not specified", and
-// setMessageReaction and deleteMessageReaction "chat_id is empty".
+// setMessageReaction and deleteMessageReaction "chat_id is empty". Of the
+// widget methods (10.4), sendWidget needs html first, sendSharedWidget fails
+// with "chat_id is empty", editMessageWidgetData with "Message identifier is
+// not specified", and answerWidgetQuery asks for query 0 the way
+// answerCallbackQuery does. editSharedWidgetData is left
+// out: it hands widget 0 and an empty public_data straight to TDLib.
 var probeSafe = map[string]bool{
 	"answerCallbackQuery":             true,
 	"answerInlineQuery":               true,
+	"answerWidgetQuery":               true,
 	"copyMessage":                     true,
 	"deleteEphemeralMessage":          true,
 	"deleteMessage":                   true,
@@ -52,6 +58,7 @@ var probeSafe = map[string]bool{
 	"editMessageMedia":                true,
 	"editMessageReplyMarkup":          true,
 	"editMessageText":                 true,
+	"editMessageWidgetData":           true,
 	"forwardMessage":                  true,
 	"getChat":                         true,
 	"getChatMember":                   true,
@@ -67,8 +74,10 @@ var probeSafe = map[string]bool{
 	"sendPhoto":                       true,
 	"sendRichMessage":                 true,
 	"sendRichMessageDraft":            true,
+	"sendSharedWidget":                true,
 	"sendVideo":                       true,
 	"sendVoice":                       true,
+	"sendWidget":                      true,
 	"setMessageReaction":              true,
 }
 

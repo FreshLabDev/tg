@@ -5,7 +5,7 @@
 <p align="center">
   <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.0.1--alpha.1-26A5E4?style=for-the-badge&labelColor=0f172a" alt="version"></a>
   <a href="go.mod"><img src="https://img.shields.io/badge/go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white&labelColor=0f172a" alt="go version"></a>
-  <a href="https://core.telegram.org/bots/api"><img src="https://img.shields.io/badge/bot%20api-10.3-26A5E4?style=for-the-badge&labelColor=0f172a" alt="Bot API 10.3"></a>
+  <a href="https://core.telegram.org/bots/api"><img src="https://img.shields.io/badge/bot%20api-10.4-26A5E4?style=for-the-badge&labelColor=0f172a" alt="Bot API 10.4"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
 
@@ -109,7 +109,7 @@ bot's token, so mounting the whole thing would hand those over. See
 | `APIError` and its classifiers | panels, menus, callback routing |
 | protocol types | domain types (delivery bookkeeping, jobs) |
 | methods the family uses, plus `Call` for the rest | formatting decisions |
-| rich messages and the 10.3 ephemeral contract | when to split a message |
+| rich messages, ephemeral messages and widgets | when to split a message, what a widget draws |
 | media sends, uploads and inline answers | which result is worth showing |
 | files, including `--local` | how long to keep a transcript |
 | capability probe and preflight | metrics naming (the module emits `Event`) |
